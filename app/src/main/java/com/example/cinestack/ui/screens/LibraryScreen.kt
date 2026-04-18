@@ -38,6 +38,7 @@ fun LibraryScreen(
     val tabs = listOf("ALL MEDIA", "MOVIE", "TV SERIES", "Anime", "GROUPS")
 
     var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var groupToDelete by remember { mutableStateOf<com.example.cinestack.data.local.GroupEntity?>(null) }
     var newGroupName by remember { mutableStateOf("") }
 
     val filteredLibrary = when (selectedTab) {
@@ -137,6 +138,9 @@ fun LibraryScreen(
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(group.name, color = Color.White, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.weight(1f))
+                            IconButton(onClick = { groupToDelete = group }) {
+                                Icon(Icons.Default.DeleteOutline, null, tint = Color.Gray)
+                            }
                             Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
                         }
                     }
@@ -174,36 +178,95 @@ fun LibraryScreen(
                 }
             }
         } else {
-            item {
-                SectionHeaderWithLine("MY COLLECTION", MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            val chunks = filteredLibrary.chunked(2)
-            items(chunks) { chunk ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    chunk.forEach { movie ->
-                        LibraryMediaCard(
-                            title = movie.title,
-                            subtitle = "${movie.releaseYear} • ${String.format("%.1f", movie.userRating)}/10",
-                            imageUrl = movie.posterUrl,
-                            badge = if (movie.userStatus == "Watching") "EP ${movie.currentEpisode}" else if (movie.userStatus.isNotEmpty()) movie.userStatus.uppercase() else null,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onMovieClick(movie) }
-                        )
+            val statusList = listOf("Watching", "Completed", "Plan", "Dropped")
+            
+            statusList.forEach { status ->
+                val statusFiltered = filteredLibrary.filter { it.userStatus == status }
+                if (statusFiltered.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        SectionHeaderWithLine(status.uppercase(), MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
-                    if (chunk.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
+
+                    val chunks = statusFiltered.chunked(2)
+                    items(chunks) { chunk ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            chunk.forEach { movie ->
+                                LibraryMediaCard(
+                                    title = movie.title,
+                                    subtitle = "${movie.releaseYear} • ${String.format("%.1f", movie.userRating)}/10",
+                                    imageUrl = movie.posterUrl,
+                                    badge = if (movie.userStatus == "Watching") "EP ${movie.currentEpisode}" else if (movie.userStatus.isNotEmpty()) movie.userStatus.uppercase() else null,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onMovieClick(movie) }
+                                )
+                            }
+                            if (chunk.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Handle items with no status or unknown status if any
+            val otherItems = filteredLibrary.filter { it.userStatus !in statusList }
+            if (otherItems.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    SectionHeaderWithLine("OTHER", MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                val chunks = otherItems.chunked(2)
+                items(chunks) { chunk ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        chunk.forEach { movie ->
+                            LibraryMediaCard(
+                                title = movie.title,
+                                subtitle = "${movie.releaseYear} • ${String.format("%.1f", movie.userRating)}/10",
+                                imageUrl = movie.posterUrl,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onMovieClick(movie) }
+                            )
+                        }
+                        if (chunk.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (groupToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { groupToDelete = null },
+            containerColor = Color(0xFF1A1A1A),
+            title = { Text("Delete Group", color = Color.White) },
+            text = { Text("Are you sure you want to delete '${groupToDelete?.name}'?", color = Color.Gray) },
+            confirmButton = {
+                TextButton(onClick = {
+                    groupToDelete?.let { viewModel.deleteGroup(it.id) }
+                    groupToDelete = null
+                }) { Text("DELETE", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToDelete = null }) { Text("CANCEL", color = Color.White) }
+            }
+        )
     }
 
     if (showCreateGroupDialog) {

@@ -15,7 +15,7 @@ data class GroupItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val groupId: Int,
     val type: String, // "MOVIE", "PERSON"
-    val externalId: Int,
+    val externalId: String,
     val title: String, // Cached for display
     val imageUrl: String // Cached for display
 )

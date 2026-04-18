@@ -1,30 +1,69 @@
 package com.example.cinestack.data.repository
 
-import com.example.cinestack.data.model.Movie
-import com.example.cinestack.data.remote.ApiService
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-
+import com.example.cinestack.data.local.GroupEntity
+import com.example.cinestack.data.local.GroupItemEntity
 import com.example.cinestack.data.local.MovieDao
 import com.example.cinestack.data.local.MovieEntity
+import com.example.cinestack.data.model.Movie
+import com.example.cinestack.data.remote.ApiService
+import com.example.cinestack.data.remote.TMDBCast
+import com.example.cinestack.data.remote.TMDBCombinedCredit
+import com.example.cinestack.data.remote.TMDBMovie
+import com.example.cinestack.data.remote.TMDBMovieDetailsResponse
+import com.example.cinestack.data.remote.TMDBPersonDetails
+import com.example.cinestack.data.remote.ThePornDbService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 
 class MovieRepository(private val movieDao: MovieDao) {
-    private var apiKey = "201b96b1a333e456ac48450aaf405103"
+
+    // ── API keys ──────────────────────────────────────────────────────────────
+    private var tmdbApiKey = "201b96b1a333e456ac48450aaf405103"
+    private val pdbApiKey  = "6AlGmVDmRpkTIugbj6th798S4UiXPbvLOCnFVeb714a79139" // theporndb.net/user/api-tokens
 
     fun updateApiKey(newKey: String) {
-        if (newKey.isNotBlank()) {
-            apiKey = newKey
-        }
+        if (newKey.isNotBlank()) tmdbApiKey = newKey
     }
 
+    // ── HTTP client (shared) ──────────────────────────────────────────────────
+    private val okHttpClient: OkHttpClient by lazy {
+        val logging = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
+        OkHttpClient.Builder()
+            .addInterceptor(logging)
+            .build()
+    }
+
+    // ── TMDB + Jikan Retrofit ─────────────────────────────────────────────────
+    private val apiService: ApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.themoviedb.org/3/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ApiService::class.java)
+    }
+
+    // ── ThePornDB Retrofit ────────────────────────────────────────────────────
+    private val pdbService: ThePornDbService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.theporndb.net/")  // REST API base
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ThePornDbService::class.java)
+    }
+
+    // ── Library ───────────────────────────────────────────────────────────────
     private val _library = MutableStateFlow<List<Movie>>(emptyList())
     val library: StateFlow<List<Movie>> = _library.asStateFlow()
 
@@ -36,241 +75,238 @@ class MovieRepository(private val movieDao: MovieDao) {
         }
     }
 
-    // New Group-related StateFlows
-    private val _allGroups = MutableStateFlow<List<com.example.cinestack.data.local.GroupEntity>>(emptyList())
-    val allGroups: StateFlow<List<com.example.cinestack.data.local.GroupEntity>> = _allGroups.asStateFlow()
-
-    init {
-        CoroutineScope(Dispatchers.IO).launch {
-            movieDao.getAllGroups().collect { groups ->
-                _allGroups.value = groups
-            }
-        }
-    }
-
-    suspend fun getGroupItems(groupId: Int) = movieDao.getGroupItems(groupId)
-    suspend fun getSubGroups(parentId: Int) = movieDao.getSubGroups(parentId)
-    suspend fun getGroupById(groupId: Int) = movieDao.getGroupById(groupId)
-
-    fun createGroup(name: String, parentId: Int? = null) {
-        CoroutineScope(Dispatchers.IO).launch {
-            movieDao.insertGroup(com.example.cinestack.data.local.GroupEntity(name = name, parentGroupId = parentId))
-        }
-    }
-
-    fun addItemToGroup(groupId: Int, movie: Movie) {
-        CoroutineScope(Dispatchers.IO).launch {
-            movieDao.insertGroupItem(com.example.cinestack.data.local.GroupItemEntity(
-                groupId = groupId,
-                type = "MOVIE",
-                externalId = movie.id,
-                title = movie.title,
-                imageUrl = movie.posterUrl
-            ))
-        }
-    }
-
-    fun addPersonToGroup(groupId: Int, cast: com.example.cinestack.data.remote.TMDBCast) {
-        CoroutineScope(Dispatchers.IO).launch {
-            movieDao.insertGroupItem(com.example.cinestack.data.local.GroupItemEntity(
-                groupId = groupId,
-                type = "PERSON",
-                externalId = cast.id,
-                title = cast.name,
-                imageUrl = "https://image.tmdb.org/t/p/w500${cast.profilePath}"
-            ))
-        }
-    }
-
     fun addToLibrary(movie: Movie, status: String = "", personalScore: Double = 0.0, season: Int = 0, episode: Int = 0) {
         CoroutineScope(Dispatchers.IO).launch {
             movieDao.insertMovie(movie.toEntity(status, personalScore, season, episode))
         }
     }
 
-    fun removeFromLibrary(movieId: Int) {
+    fun removeFromLibrary(movieId: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val entity = _library.value.find { it.id == movieId }?.toEntity()
-            if (entity != null) {
-                movieDao.deleteMovie(entity)
+            _library.value.find { it.id == movieId }?.toEntity()?.let {
+                movieDao.deleteMovie(it)
             }
         }
     }
 
-    fun isInLibrary(movieId: Int): Boolean {
-        return _library.value.any { it.id == movieId }
-    }
+    fun isInLibrary(movieId: String): Boolean =
+        _library.value.any { it.id == movieId }
 
-    private fun MovieEntity.toMovie() = Movie(
-        id = id,
-        title = title,
-        posterUrl = posterUrl,
-        backdropUrl = backdropUrl,
-        rating = rating,
-        genre = genres.split(","),
-        duration = duration,
-        releaseYear = releaseYear,
-        synopsis = synopsis,
-        mediaType = mediaType,
-        userStatus = userStatus,
-        userRating = userRating,
-        currentSeason = currentSeason,
-        currentEpisode = currentEpisode,
-        totalEpisodes = totalEpisodes
-    )
+    // ── Groups ────────────────────────────────────────────────────────────────
+    private val _allGroups = MutableStateFlow<List<GroupEntity>>(emptyList())
+    val allGroups: StateFlow<List<GroupEntity>> = _allGroups.asStateFlow()
 
-    private fun Movie.toEntity(status: String = userStatus, score: Double = userRating, season: Int = currentSeason, episode: Int = currentEpisode) = MovieEntity(
-        id = id,
-        title = title,
-        posterUrl = posterUrl,
-        backdropUrl = backdropUrl,
-        rating = rating,
-        genres = genre.joinToString(","),
-        duration = duration,
-        releaseYear = releaseYear,
-        synopsis = synopsis,
-        mediaType = mediaType,
-        userStatus = status,
-        userRating = score,
-        currentSeason = season,
-        currentEpisode = episode,
-        totalEpisodes = totalEpisodes
-    )
-
-    private val apiService: ApiService by lazy {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+    init {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.getAllGroups().collect { _allGroups.value = it }
         }
-        val client = OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .build()
-
-        Retrofit.Builder()
-            .baseUrl("https://api.themoviedb.org/3/")
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ApiService::class.java)
     }
 
-    suspend fun searchMovies(query: String): List<Movie> {
-        val response = apiService.searchMovies(apiKey, query)
-        return response.results.map {
+    suspend fun getGroupItems(groupId: Int)  = movieDao.getGroupItems(groupId)
+    suspend fun getSubGroups(parentId: Int)  = movieDao.getSubGroups(parentId)
+    suspend fun getGroupById(groupId: Int)   = movieDao.getGroupById(groupId)
+
+    fun createGroup(name: String, parentId: Int? = null) {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.insertGroup(GroupEntity(name = name, parentGroupId = parentId))
+        }
+    }
+
+    fun deleteGroup(groupId: Int) {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.getGroupById(groupId)?.let { movieDao.deleteGroup(it) }
+        }
+    }
+
+    fun addItemToGroup(groupId: Int, movie: Movie) {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.insertGroupItem(GroupItemEntity(
+                groupId    = groupId,
+                type       = "MOVIE",
+                externalId = movie.id,
+                title      = movie.title,
+                imageUrl   = movie.posterUrl
+            ))
+        }
+    }
+
+    fun addPersonToGroup(groupId: Int, cast: TMDBCast) {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.insertGroupItem(GroupItemEntity(
+                groupId    = groupId,
+                type       = "PERSON",
+                externalId = cast.id,
+                title      = cast.name,
+                imageUrl   = "https://image.tmdb.org/t/p/w500${cast.profilePath}"
+            ))
+        }
+    }
+
+    fun removeGroupItem(item: GroupItemEntity) {
+        CoroutineScope(Dispatchers.IO).launch { movieDao.deleteGroupItem(item) }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+    suspend fun searchMovies(query: String): List<Movie> =
+        apiService.searchMovies(tmdbApiKey, query).results.map { it.toMovie("movie") }
+
+    suspend fun searchTV(query: String): List<Movie> =
+        apiService.searchTV(tmdbApiKey, query).results.map { it.toMovie("tv") }
+
+    suspend fun searchAnime(query: String): List<Movie> =
+        apiService.searchAnime(query).data.map { anime ->
             Movie(
-                id = it.id,
-                title = it.title ?: it.name ?: "Unknown",
-                posterUrl = "https://image.tmdb.org/t/p/w500${it.posterPath}",
-                backdropUrl = "https://image.tmdb.org/t/p/original${it.backdropPath}",
-                rating = it.voteAverage,
-                genre = listOf("Movie"),
-                duration = "N/A",
-                releaseYear = it.releaseDate?.take(4)?.toIntOrNull() ?: 0,
-                synopsis = it.overview,
-                mediaType = "movie"
+                id          = anime.malId,
+                title       = anime.title,
+                posterUrl   = anime.images.jpg.largeImageUrl,
+                backdropUrl = anime.images.jpg.largeImageUrl,
+                rating      = anime.score ?: 0.0,
+                genre       = listOf("Anime"),
+                duration    = "${anime.episodes ?: "?"} eps",
+                releaseYear = anime.year ?: 0,
+                synopsis    = anime.synopsis ?: "",
+                mediaType   = "anime"
             )
         }
-    }
 
-    suspend fun searchTV(query: String): List<Movie> {
-        val response = apiService.searchTV(apiKey, query)
-        return response.results.map {
-            Movie(
-                id = it.id,
-                title = it.title ?: it.name ?: "Unknown",
-                posterUrl = "https://image.tmdb.org/t/p/w500${it.posterPath}",
-                backdropUrl = "https://image.tmdb.org/t/p/original${it.backdropPath}",
-                rating = it.voteAverage,
-                genre = listOf("TV Series"),
-                duration = "N/A",
-                releaseYear = it.firstAirDate?.take(4)?.toIntOrNull() ?: 0,
-                synopsis = it.overview,
-                mediaType = "tv"
+    suspend fun searchPDBScenes(query: String): List<Movie> {
+        return try {
+            val response = pdbService.searchScenes(
+                auth  = "Bearer $pdbApiKey",
+                query = query
             )
-        }
-    }
-
-    suspend fun searchAnime(query: String): List<Movie> {
-        val response = apiService.searchAnime(query)
-        return response.data.map {
-            Movie(
-                id = it.malId,
-                title = it.title,
-                posterUrl = it.images.jpg.largeImageUrl,
-                backdropUrl = it.images.jpg.largeImageUrl,
-                rating = it.score ?: 0.0,
-                genre = listOf("Anime"),
-                duration = "${it.episodes ?: "?"} eps",
-                releaseYear = it.year ?: 0,
-                synopsis = it.synopsis ?: "",
-                mediaType = "anime"
-            )
-        }
-    }
-
-    suspend fun getCast(movieId: Int, type: String = "movie"): List<com.example.cinestack.data.remote.TMDBCast> {
-        if (type == "anime") return emptyList()
-        return try {
-            apiService.getCredits(type, movieId, apiKey).cast
+            response.data.map { scene ->
+                val imageUrl = scene.background?.full
+                    ?: scene.background?.medium
+                    ?: scene.posters?.full
+                    ?: scene.posters?.medium
+                    ?: ""
+                Movie(
+                    id          = scene.id,
+                    title       = scene.title,
+                    posterUrl   = imageUrl,
+                    backdropUrl = imageUrl,
+                    rating      = 0.0,
+                    genre       = listOf(scene.site?.name ?: "XXX"),
+                    duration    = scene.duration?.let { "${it / 60} min" } ?: "N/A",
+                    releaseYear = scene.date?.take(4)?.toIntOrNull() ?: 0,
+                    synopsis    = buildString {
+                        val names = scene.performers
+                            ?.mapNotNull { it.name }
+                            ?.filter { it.isNotBlank() }
+                        if (!names.isNullOrEmpty()) append(names.joinToString(", "))
+                        scene.site?.name?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append(it)
+                        }
+                    },
+                    mediaType   = "xxx"
+                )
+            }
         } catch (e: Exception) {
+            e.printStackTrace()
             emptyList()
         }
     }
 
-    suspend fun getMovieDetails(movieId: Int, type: String = "movie"): com.example.cinestack.data.remote.TMDBMovieDetailsResponse? {
-        if (type == "anime") return null
-        return try {
-            apiService.getDetails(type, movieId, apiKey)
-        } catch (e: Exception) {
-            null
-        }
+    // ── Details / Cast / Recommendations ─────────────────────────────────────
+    suspend fun getCast(movieId: String, type: String = "movie"): List<TMDBCast> {
+        if (type == "anime" || type == "xxx") return emptyList()
+        return try { apiService.getCredits(type, movieId, tmdbApiKey).cast }
+        catch (e: Exception) { emptyList() }
     }
 
-    suspend fun getPersonDetails(personId: Int): com.example.cinestack.data.remote.TMDBPersonDetails? {
-        return try {
-            apiService.getPersonDetails(personId, apiKey)
-        } catch (e: Exception) {
-            null
-        }
+    suspend fun getMovieDetails(movieId: String, type: String = "movie"): TMDBMovieDetailsResponse? {
+        if (type == "anime" || type == "xxx") return null
+        return try { apiService.getDetails(type, movieId, tmdbApiKey) }
+        catch (e: Exception) { null }
     }
 
-    suspend fun getTrendingMovies(): List<Movie> {
-        return try {
-            val response = apiService.getTrendingMovies(apiKey)
-            response.results.map { it.toMovie() }
-        } catch (e: Exception) {
-            emptyList()
-        }
+    suspend fun getPersonDetails(personId: String): TMDBPersonDetails? =
+        try { apiService.getPersonDetails(personId, tmdbApiKey) }
+        catch (e: Exception) { null }
+
+    suspend fun getTrendingMovies(): List<Movie> =
+        try { apiService.getTrendingMovies(tmdbApiKey).results.map { it.toMovie() } }
+        catch (e: Exception) { emptyList() }
+
+    suspend fun getPopularMovies(): List<Movie> =
+        try { apiService.getPopularMovies(tmdbApiKey).results.map { it.toMovie() } }
+        catch (e: Exception) { emptyList() }
+
+    suspend fun getRecommendations(movieId: String, type: String = "movie"): List<Movie> {
+        if (type == "anime" || type == "xxx") return emptyList()
+        return try { apiService.getRecommendations(type, movieId, tmdbApiKey).results.map { it.toMovie(type) } }
+        catch (e: Exception) { emptyList() }
     }
 
-    suspend fun getPopularMovies(): List<Movie> {
-        return try {
-            val response = apiService.getPopularMovies(apiKey)
-            response.results.map { it.toMovie() }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    suspend fun getRecommendations(movieId: Int, type: String = "movie"): List<Movie> {
-        if (type == "anime") return emptyList()
-        return try {
-            val response = apiService.getRecommendations(type, movieId, apiKey)
-            response.results.map { it.toMovie(type) }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun com.example.cinestack.data.remote.TMDBMovie.toMovie(type: String = "movie") = Movie(
+    private fun TMDBCombinedCredit.toMovieModel() = Movie(
         id = id,
         title = title ?: name ?: "Unknown",
         posterUrl = "https://image.tmdb.org/t/p/w500$posterPath",
         backdropUrl = "https://image.tmdb.org/t/p/original$backdropPath",
         rating = voteAverage,
-        genre = listOf(if (type == "movie") "Movie" else "TV Series"),
+        genre = listOf(if (mediaType == "tv") "TV Series" else "Movie"),
         duration = "N/A",
         releaseYear = (releaseDate ?: firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
-        synopsis = overview,
-        mediaType = type
+        synopsis = overview ?: "",
+        mediaType = mediaType
+    )
+
+    fun mapCombinedCreditToMovie(credit: TMDBCombinedCredit) = credit.toMovieModel()
+
+    // ── Mappers ───────────────────────────────────────────────────────────────
+    private fun TMDBMovie.toMovie(type: String = "movie") = Movie(
+        id          = id,
+        title       = title ?: name ?: "Unknown",
+        posterUrl   = "https://image.tmdb.org/t/p/w500$posterPath",
+        backdropUrl = "https://image.tmdb.org/t/p/original$backdropPath",
+        rating      = voteAverage,
+        genre       = listOf(if (type == "tv") "TV Series" else "Movie"),
+        duration    = "N/A",
+        releaseYear = (releaseDate ?: firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
+        synopsis    = overview,
+        mediaType   = type
+    )
+
+    private fun MovieEntity.toMovie() = Movie(
+        id             = id,
+        title          = title,
+        posterUrl      = posterUrl,
+        backdropUrl    = backdropUrl,
+        rating         = rating,
+        genre          = genres.split(","),
+        duration       = duration,
+        releaseYear    = releaseYear,
+        synopsis       = synopsis,
+        mediaType      = mediaType,
+        userStatus     = userStatus,
+        userRating     = userRating,
+        currentSeason  = currentSeason,
+        currentEpisode = currentEpisode,
+        totalEpisodes  = totalEpisodes
+    )
+
+    private fun Movie.toEntity(
+        status: String = userStatus,
+        score: Double = userRating,
+        season: Int = currentSeason,
+        episode: Int = currentEpisode
+    ) = MovieEntity(
+        id             = id,
+        title          = title,
+        posterUrl      = posterUrl,
+        backdropUrl    = backdropUrl,
+        rating         = rating,
+        genres         = genre.joinToString(","),
+        duration       = duration,
+        releaseYear    = releaseYear,
+        synopsis       = synopsis,
+        mediaType      = mediaType,
+        userStatus     = status,
+        userRating     = score,
+        currentSeason  = season,
+        currentEpisode = episode,
+        totalEpisodes  = totalEpisodes
     )
 }

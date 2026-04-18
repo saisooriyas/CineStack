@@ -42,7 +42,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     val library: StateFlow<List<Movie>>
 
-    private val movieCache = mutableMapOf<Int, Movie>()
+    private val movieCache = mutableMapOf<String, Movie>()
 
     init {
         val database = AppDatabase.getDatabase(application)
@@ -55,7 +55,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         movies.forEach { movieCache[it.id] = it }
     }
 
-    fun getMovieFromCache(movieId: Int?): Movie? {
+    fun getMovieFromCache(movieId: String?): Movie? {
         if (movieId == null) return null
         return movieCache[movieId] ?: library.value.find { it.id == movieId }
     }
@@ -86,6 +86,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                     "movie" -> repository.searchMovies(query)
                     "tv" -> repository.searchTV(query)
                     "anime" -> repository.searchAnime(query)
+                    "xxx scenes" -> repository.searchPDBScenes(query)
                     else -> emptyList()
                 }
                 updateCache(results)
@@ -108,7 +109,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _recommendations = MutableStateFlow<List<Movie>>(emptyList())
     val recommendations: StateFlow<List<Movie>> = _recommendations
 
-    fun fetchCast(movieId: Int, type: String = "movie") {
+    fun fetchCast(movieId: String, type: String = "movie") {
         viewModelScope.launch {
             _cast.value = repository.getCast(movieId, type)
             _movieDetails.value = repository.getMovieDetails(movieId, type)
@@ -118,7 +119,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun fetchPersonDetails(personId: Int) {
+    fun fetchPersonDetails(personId: String) {
         viewModelScope.launch {
             _personDetails.value = repository.getPersonDetails(personId)
         }
@@ -132,15 +133,15 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         repository.addToLibrary(movie, status, rating, season, episode)
     }
 
-    fun getLibraryMovie(movieId: Int): Movie? {
+    fun getLibraryMovie(movieId: String): Movie? {
         return repository.library.value.find { it.id == movieId }
     }
 
-    fun removeFromLibrary(movieId: Int) {
+    fun removeFromLibrary(movieId: String) {
         repository.removeFromLibrary(movieId)
     }
 
-    fun isInLibrary(movieId: Int): Boolean {
+    fun isInLibrary(movieId: String): Boolean {
         return repository.isInLibrary(movieId)
     }
 
@@ -148,11 +149,19 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         repository.updateApiKey(newKey)
     }
 
+    fun mapCombinedCreditToMovie(credit: com.example.cinestack.data.remote.TMDBCombinedCredit): Movie {
+        val movie = repository.mapCombinedCreditToMovie(credit)
+        movieCache[movie.id] = movie
+        return movie
+    }
+
     // Group methods
     val allGroups = repository.allGroups
     fun createGroup(name: String, parentId: Int? = null) = repository.createGroup(name, parentId)
+    fun deleteGroup(groupId: Int) = repository.deleteGroup(groupId)
     fun addItemToGroup(groupId: Int, movie: Movie) = repository.addItemToGroup(groupId, movie)
     fun addPersonToGroup(groupId: Int, cast: com.example.cinestack.data.remote.TMDBCast) = repository.addPersonToGroup(groupId, cast)
+    fun removeGroupItem(item: com.example.cinestack.data.local.GroupItemEntity) = repository.removeGroupItem(item)
     suspend fun getGroupItems(groupId: Int) = repository.getGroupItems(groupId)
     suspend fun getSubGroups(parentId: Int) = repository.getSubGroups(parentId)
     suspend fun getGroupById(groupId: Int) = repository.getGroupById(groupId)

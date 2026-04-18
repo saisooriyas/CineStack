@@ -43,7 +43,7 @@ fun HomeScreen(
         item {
             SearchBar(
                 query = query,
-                onQueryChange = { 
+                onQueryChange = {
                     viewModel.search(it)
                 }
             )
@@ -56,7 +56,7 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("Movie", "TV", "Anime").forEach { type ->
+                listOf("Movie", "TV", "Anime", "XXX Scenes").forEach { type ->
                     FilterChip(
                         selected = selectedType == type,
                         onClick = { 
@@ -85,10 +85,10 @@ fun HomeScreen(
             // You can add sample data or a placeholder here
         } else {
             items(searchResults) { movie ->
-                if (selectedType == "Anime") {
-                    AnimeListCard(movie = movie, onClick = { onMovieClick(movie) })
-                } else {
-                    FeaturedMovieCard(movie = movie, onMovieClick = onMovieClick)
+                when (selectedType) {
+                    "Anime"      -> AnimeListCard(movie = movie, onClick = { onMovieClick(movie) })
+                    "XXX Scenes" -> XxxSceneCard(movie = movie, onClick = { onMovieClick(movie) })
+                    else         -> FeaturedMovieCard(movie = movie, onMovieClick = onMovieClick)
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -299,6 +299,104 @@ fun AnimeListCard(movie: Movie, onClick: () -> Unit) {
                     color = Color.Gray,
                     maxLines = 2
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun XxxSceneCard(movie: Movie, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clickable { onClick() },
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .height(110.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(160.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1A1A1A))
+            ) {
+                AsyncImage(
+                    model = movie.posterUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Surface(
+                    color = Color(0xFFAA0000),
+                    shape = RoundedCornerShape(bottomEnd = 6.dp),
+                    modifier = Modifier.align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = "XXX",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = movie.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = movie.genre.firstOrNull() ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Column {
+                    if (movie.synopsis.isNotBlank()) {
+                        Text(
+                            text = movie.synopsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            maxLines = 2
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (movie.releaseYear > 0) {
+                            Text(
+                                text = "${movie.releaseYear}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                        if (movie.duration != "N/A") {
+                            Text(
+                                text = "⏱ ${movie.duration}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
             }
         }
     }

@@ -2,28 +2,63 @@ package com.example.cinestack.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.cinestack.data.model.Movie
 import com.example.cinestack.ui.viewmodel.SearchViewModel
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +78,8 @@ fun GroupDetailsScreen(
     
     var showAddDialog by remember { mutableStateOf(false) }
     var showCreateSubGroupDialog by remember { mutableStateOf(false) }
+    var showDeleteGroupDialog by remember { mutableStateOf(false) }
+    var itemToRemove by remember { mutableStateOf<com.example.cinestack.data.local.GroupItemEntity?>(null) }
     var newSubGroupName by remember { mutableStateOf("") }
     
     val scope = rememberCoroutineScope()
@@ -72,6 +109,9 @@ fun GroupDetailsScreen(
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { showDeleteGroupDialog = true }) {
+                        Icon(Icons.Default.DeleteOutline, null, tint = Color.Red)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
@@ -122,15 +162,22 @@ fun GroupDetailsScreen(
                 items(movies.chunked(2)) { chunk ->
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         chunk.forEach { item ->
-                            LibraryMediaCard(
-                                title = item.title,
-                                subtitle = "Movie",
-                                imageUrl = item.imageUrl,
-                                modifier = Modifier.weight(1f).clickable {
-                                    // Need to find full movie object or create placeholder
-                                    onMovieClick(Movie(id = item.externalId, title = item.title, posterUrl = item.imageUrl, backdropUrl = "", rating = 0.0, genre = emptyList(), duration = "", releaseYear = 0, synopsis = ""))
+                            Box(modifier = Modifier.weight(1f)) {
+                                LibraryMediaCard(
+                                    title = item.title,
+                                    subtitle = "Movie",
+                                    imageUrl = item.imageUrl,
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        onMovieClick(Movie(id = item.externalId, title = item.title, posterUrl = item.imageUrl, backdropUrl = "", rating = 0.0, genre = emptyList(), duration = "", releaseYear = 0, synopsis = ""))
+                                    }
+                                )
+                                IconButton(
+                                    onClick = { itemToRemove = item },
+                                    modifier = Modifier.align(Alignment.TopEnd).background(Color.Black.copy(alpha = 0.5f), CircleShape).size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
                                 }
-                            )
+                            }
                         }
                         if (chunk.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
@@ -159,6 +206,10 @@ fun GroupDetailsScreen(
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(person.title, color = Color.White, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(onClick = { itemToRemove = person }) {
+                                Icon(Icons.Default.Delete, null, tint = Color.Gray)
+                            }
                         }
                     }
                 }
@@ -177,6 +228,43 @@ fun GroupDetailsScreen(
                 }
             }
         }
+    }
+
+    if (showDeleteGroupDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteGroupDialog = false },
+            containerColor = Color(0xFF1A1A1A),
+            title = { Text("Delete Group", color = Color.White) },
+            text = { Text("Are you sure you want to delete this group? All items within it will be removed from the group.", color = Color.Gray) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteGroup(groupId)
+                    onBackClick()
+                    showDeleteGroupDialog = false
+                }) { Text("DELETE", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteGroupDialog = false }) { Text("CANCEL", color = Color.White) }
+            }
+        )
+    }
+
+    if (itemToRemove != null) {
+        AlertDialog(
+            onDismissRequest = { itemToRemove = null },
+            containerColor = Color(0xFF1A1A1A),
+            title = { Text("Remove Item", color = Color.White) },
+            text = { Text("Remove '${itemToRemove?.title}' from this group?", color = Color.Gray) },
+            confirmButton = {
+                TextButton(onClick = {
+                    itemToRemove?.let { viewModel.removeGroupItem(it) }
+                    itemToRemove = null
+                }) { Text("REMOVE", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { itemToRemove = null }) { Text("CANCEL", color = Color.White) }
+            }
+        )
     }
 
     if (showCreateSubGroupDialog) {

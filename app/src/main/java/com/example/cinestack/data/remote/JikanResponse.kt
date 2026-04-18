@@ -7,7 +7,7 @@ data class JikanResponse(
 )
 
 data class AnimeData(
-    @SerializedName("mal_id") val malId: Int,
+    @SerializedName("mal_id") val malId: String,
     val title: String,
     val images: AnimeImages,
     val score: Double?,
