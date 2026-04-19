@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cinestack.data.local.AppDatabase
 import com.example.cinestack.data.model.Movie
+import com.example.cinestack.data.remote.PDBPerformerResult
 import com.example.cinestack.data.repository.MovieRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +45,21 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     private val movieCache = mutableMapOf<String, Movie>()
 
+    private val _currentPage = MutableStateFlow(1)
+    val currentPage: StateFlow<Int> = _currentPage
+
+    private val _hasMoreResults = MutableStateFlow(false)
+    val hasMoreResults: StateFlow<Boolean> = _hasMoreResults
+
+    private val _performerSuggestions = MutableStateFlow<List<PDBPerformerResult>>(emptyList())
+    val performerSuggestions: StateFlow<List<PDBPerformerResult>> = _performerSuggestions
+
+    private val _selectedCastIds = MutableStateFlow<List<Pair<String, String>>>(emptyList()) // id to name
+    val selectedCastIds: StateFlow<List<Pair<String, String>>> = _selectedCastIds
+
+    // Cache previous pages so back doesn't reload
+    private val _pagedResults = mutableListOf<Movie>()
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = MovieRepository(database.movieDao())
@@ -62,8 +78,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun fetchDashboardData() {
         viewModelScope.launch {
-            val trending = repository.getTrendingMovies()
-            val popular = repository.getPopularMovies()
+            val trending = repository.getTrendingMovies().distinctBy { it.id }
+            val popular = repository.getPopularMovies().distinctBy { it.id }
             updateCache(trending)
             updateCache(popular)
             _trendingMovies.value = trending
@@ -71,31 +87,43 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun search(query: String, type: String = _selectedType.value) {
-        _searchQuery.value = query
+    fun search(query: String, type: String = _selectedType.value, page: Int = 1) {
+        _searchQuery.value  = query
         _selectedType.value = type
-        if (query.isBlank()) {
-            _searchResults.value = emptyList()
-            return
-        }
+        _currentPage.value  = page
+        if (query.isBlank()) { _searchResults.value = emptyList(); return }
 
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val results = when (type.lowercase()) {
-                    "movie" -> repository.searchMovies(query)
-                    "tv" -> repository.searchTV(query)
-                    "anime" -> repository.searchAnime(query)
+                val rawResults = when (type.lowercase()) {
+                    "movie"      -> repository.searchMovies(query, page)
+                    "tv"         -> repository.searchTV(query, page)
+                    "anime"      -> repository.searchAnime(query, page)
                     "xxx scenes" -> repository.searchPDBScenes(query)
-                    else -> emptyList()
+                    else         -> emptyList()
                 }
+                val results = rawResults.distinctBy { it.id }
+                if (page == 1) _pagedResults.clear()
+                _pagedResults.addAll(results)
+                _searchResults.value  = _pagedResults.toList()
+                _hasMoreResults.value = results.size >= 20  // if full page returned, assume more exist
                 updateCache(results)
-                _searchResults.value = results
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
                 _isLoading.value = false
             }
+        }
+    }
+
+    fun loadNextPage() {
+        search(_searchQuery.value, _selectedType.value, _currentPage.value + 1)
+    }
+
+    fun loadPreviousPage() {
+        if (_currentPage.value > 1) {
+            search(_searchQuery.value, _selectedType.value, _currentPage.value - 1)
         }
     }
 
@@ -153,6 +181,40 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         val movie = repository.mapCombinedCreditToMovie(credit)
         movieCache[movie.id] = movie
         return movie
+    }
+
+    fun searchPerformers(query: String) {
+        viewModelScope.launch {
+            if (query.length < 2) { _performerSuggestions.value = emptyList(); return@launch }
+            _performerSuggestions.value = repository.searchPerformers(query)
+        }
+    }
+
+    fun addCastFilter(id: String, name: String) {
+        val current = _selectedCastIds.value.toMutableList()
+        if (current.none { it.first == id }) current.add(id to name)
+        _selectedCastIds.value = current
+        _performerSuggestions.value = emptyList()
+        searchByCast()
+    }
+
+    fun removeCastFilter(id: String) {
+        _selectedCastIds.value = _selectedCastIds.value.filter { it.first != id }
+        searchByCast()
+    }
+
+    fun clearCastFilters() {
+        _selectedCastIds.value = emptyList()
+    }
+
+    private fun searchByCast() {
+        val ids = _selectedCastIds.value.map { it.first }
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            _isLoading.value = true
+            _searchResults.value = repository.searchPDBScenesByCast(ids)
+            _isLoading.value = false
+        }
     }
 
     // Group methods

@@ -7,6 +7,7 @@ interface ApiService {
     suspend fun searchMovies(
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
+        @Query("page") page: Int = 1,
         @Query("include_adult") includeAdult: Boolean = true
     ): TMDBResponse
 
@@ -14,12 +15,14 @@ interface ApiService {
     suspend fun searchTV(
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
+        @Query("page") page: Int = 1,
         @Query("include_adult") includeAdult: Boolean = true
     ): TMDBResponse
 
     @GET("https://api.jikan.moe/v4/anime")
     suspend fun searchAnime(
-        @Query("q") query: String
+        @Query("q") query: String,
+        @Query("page") page: Int = 1
     ): JikanResponse
 
     @GET("{type}/{id}/credits")

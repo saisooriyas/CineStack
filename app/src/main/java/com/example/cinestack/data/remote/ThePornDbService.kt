@@ -14,6 +14,22 @@ interface ThePornDbService {
         @Query("page") page: Int = 1,
         @Query("limit") limit: Int = 20
     ): PDBRestResponse
+
+    // Scenes filtered by one or more performer IDs
+    @GET("scenes")
+    suspend fun searchScenesByCast(
+        @Header("Authorization") auth: String,
+        @Query("cast[]") castIds: List<String>,   // API accepts multiple cast[] params
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 20
+    ): PDBRestResponse
+
+    @GET("performers")
+    suspend fun searchPerformers(
+        @Header("Authorization") auth: String,
+        @Query("q") query: String
+    ): PDBPerformerSearchResponse
+
 }
 
 // ── REST response models ──────────────────────────────────────────────────────
@@ -21,6 +37,16 @@ interface ThePornDbService {
 data class PDBRestResponse(
     val count: Int?,           // may be absent
     val data: List<PDBRestScene>  // root array is "data", not "results"
+)
+
+data class PDBPerformerSearchResponse(
+    val data: List<PDBPerformerResult>
+)
+
+data class PDBPerformerResult(
+    val id   : String,
+    val name : String,
+    val image: String?
 )
 
 data class PDBRestScene(

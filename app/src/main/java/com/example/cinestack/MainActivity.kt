@@ -4,12 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -57,6 +65,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.cinestack.data.model.sampleMovies
 import com.example.cinestack.ui.screens.DashboardScreen
 import com.example.cinestack.ui.screens.DetailsScreen
+import com.example.cinestack.ui.screens.GroupDetailsScreen
 import com.example.cinestack.ui.screens.HomeScreen
 import com.example.cinestack.ui.screens.LibraryScreen
 import com.example.cinestack.ui.screens.PersonDetailsScreen
@@ -78,24 +87,24 @@ class MainActivity : ComponentActivity() {
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object Dashboard : Screen("dashboard", "DASHBOARD", Icons.Default.GridView)
-    object Search : Screen("search", "SEARCH", Icons.Default.Search)
-    object Library : Screen("library", "LIBRARY", Icons.Default.ViewCarousel)
+    object Search   : Screen("search",    "SEARCH",    Icons.Default.Search)
+    object Library  : Screen("library",   "LIBRARY",   Icons.Default.ViewCarousel)
 }
+
+// Transition durations
+private const val NAV_DURATION   = 280
+private const val SLIDE_DURATION = 320
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CineStackApp() {
-    val navController = rememberNavController()
-    val searchViewModel: SearchViewModel = viewModel()
-    val items = listOf(
-        Screen.Dashboard,
-        Screen.Search,
-        Screen.Library,
-    )
+    val navController   = rememberNavController()
+    val searchViewModel : SearchViewModel = viewModel()
 
+    val topLevelRoutes = listOf(Screen.Dashboard, Screen.Search, Screen.Library)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
-    val isTopLevel = items.any { it.route == currentDestination?.route }
+    val isTopLevel = topLevelRoutes.any { it.route == currentDestination?.route }
 
     Scaffold(
         containerColor = Color.Black,
@@ -126,7 +135,9 @@ fun CineStackApp() {
                                 modifier = Modifier.size(36.dp),
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp, Color.White.copy(alpha = 0.1f)
+                                )
                             ) {
                                 Icon(
                                     Icons.Default.Person,
@@ -139,11 +150,7 @@ fun CineStackApp() {
                     },
                     actions = {
                         IconButton(onClick = { }) {
-                            Icon(
-                                Icons.Default.Notifications,
-                                contentDescription = null,
-                                tint = Color.White
-                            )
+                            Icon(Icons.Default.Notifications, null, tint = Color.White)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -155,89 +162,43 @@ fun CineStackApp() {
         },
         bottomBar = {
             if (isTopLevel) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
-                ) {
-                    // Glassmorphic background
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp),
-                        shape = CircleShape,
-                        color = Color(0xFF1A1A1A).copy(alpha = 0.8f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            Brush.linearGradient(
-                                listOf(Color.White.copy(alpha = 0.1f), Color.Transparent)
-                            )
-                        ),
-                        tonalElevation = 8.dp
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            items.forEach { screen ->
-                                val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
-                                val contentColor = if (selected) MaterialTheme.colorScheme.primary else Color.Gray
-
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            navController.navigate(screen.route) {
-                                                popUpTo(navController.graph.findStartDestination().id) {
-                                                    saveState = true
-                                                }
-                                                launchSingleTop = true
-                                                restoreState = true
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(
-                                            screen.icon,
-                                            contentDescription = null,
-                                            tint = contentColor,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        if (selected) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .padding(top = 4.dp)
-                                                    .size(4.dp)
-                                                    .background(contentColor, CircleShape)
-                                            )
-                                        }
-                                    }
-                                }
+                BottomNavBar(
+                    items        = topLevelRoutes,
+                    currentDest  = currentDestination,
+                    onItemClick  = { screen ->
+                        navController.navigate(screen.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
                             }
+                            launchSingleTop = true
+                            restoreState    = true
                         }
                     }
-                }
+                )
             }
         }
     ) { innerPadding ->
         NavHost(
-            navController = navController, 
+            navController    = navController,
             startDestination = Screen.Search.route,
-            modifier = Modifier
+            modifier         = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            // Default enter/exit for all routes (fast fade)
+            enterTransition  = { fadeIn(tween(NAV_DURATION)) },
+            exitTransition   = { fadeOut(tween(NAV_DURATION)) },
+            popEnterTransition  = { fadeIn(tween(NAV_DURATION)) },
+            popExitTransition   = { fadeOut(tween(NAV_DURATION)) }
         ) {
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
-                    viewModel = searchViewModel,
+                    viewModel   = searchViewModel,
                     onMovieClick = { movie ->
                         navController.navigate("details/${movie.id}/${movie.mediaType}")
                     }
                 )
             }
+
             composable(Screen.Search.route) {
                 HomeScreen(
                     onMovieClick = { movie ->
@@ -246,9 +207,10 @@ fun CineStackApp() {
                     viewModel = searchViewModel
                 )
             }
+
             composable(Screen.Library.route) {
                 LibraryScreen(
-                    viewModel = searchViewModel,
+                    viewModel    = searchViewModel,
                     onMovieClick = { movie ->
                         navController.navigate("details/${movie.id}/${movie.mediaType}")
                     },
@@ -257,34 +219,46 @@ fun CineStackApp() {
                     }
                 )
             }
-            composable("group/{groupId}") { backStackEntry ->
-                val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: 0
-                com.example.cinestack.ui.screens.GroupDetailsScreen(
-                    groupId = groupId,
-                    viewModel = searchViewModel,
-                    onBackClick = { navController.popBackStack() },
-                    onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
-                    },
-                    onSubGroupClick = { subId ->
-                        navController.navigate("group/$subId")
-                    }
-                )
-            }
-            composable("details/{movieId}/{mediaType}") { backStackEntry ->
+
+            // Detail screen — slides up from bottom
+            composable(
+                route = "details/{movieId}/{mediaType}",
+                enterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeIn(tween(SLIDE_DURATION))
+                },
+                exitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> -fullWidth / 3 },
+                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeOut(tween(SLIDE_DURATION))
+                },
+                popEnterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { fullWidth -> -fullWidth / 3 },
+                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeIn(tween(SLIDE_DURATION))
+                },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeOut(tween(SLIDE_DURATION))
+                }
+            ) { backStackEntry ->
                 val movieId = backStackEntry.arguments?.getString("movieId")
                 val library by searchViewModel.library.collectAsState()
-                
-                // Using a derived state to find the movie from cache or library
                 val movie = remember(movieId, library) {
-                    searchViewModel.getMovieFromCache(movieId) ?: sampleMovies.find { it.id == movieId }
+                    searchViewModel.getMovieFromCache(movieId)
+                        ?: sampleMovies.find { it.id == movieId }
                 }
-                
                 if (movie != null) {
                     DetailsScreen(
-                        movie = movie,
-                        onBackClick = { navController.popBackStack() },
-                        viewModel = searchViewModel,
+                        movie        = movie,
+                        onBackClick  = { navController.popBackStack() },
+                        viewModel    = searchViewModel,
                         onPersonClick = { personId ->
                             navController.navigate("person/$personId")
                         },
@@ -293,26 +267,89 @@ fun CineStackApp() {
                         }
                     )
                 } else {
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier            = Modifier.fillMaxSize().background(Color.Black),
+                        contentAlignment    = Alignment.Center
+                    ) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
-            composable("person/{personId}") { backStackEntry ->
+
+            // Group, Person, Profile — slide in from right
+            composable(
+                route = "group/{groupId}",
+                enterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeIn(tween(SLIDE_DURATION))
+                },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeOut(tween(SLIDE_DURATION))
+                }
+            ) { backStackEntry ->
+                val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: 0
+                GroupDetailsScreen(
+                    groupId      = groupId,
+                    viewModel    = searchViewModel,
+                    onBackClick  = { navController.popBackStack() },
+                    onMovieClick = { movie ->
+                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                    },
+                    onSubGroupClick = { subId ->
+                        navController.navigate("group/$subId")
+                    }
+                )
+            }
+
+            composable(
+                route = "person/{personId}",
+                enterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeIn(tween(SLIDE_DURATION))
+                },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeOut(tween(SLIDE_DURATION))
+                }
+            ) { backStackEntry ->
                 val personId = backStackEntry.arguments?.getString("personId") ?: ""
                 PersonDetailsScreen(
-                    personId = personId,
-                    onBackClick = { navController.popBackStack() },
+                    personId     = personId,
+                    onBackClick  = { navController.popBackStack() },
                     onMovieClick = { movie ->
                         navController.navigate("details/${movie.id}/${movie.mediaType}")
                     },
                     viewModel = searchViewModel
                 )
             }
-            composable("profile") {
+
+            composable(
+                route = "profile",
+                enterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeIn(tween(SLIDE_DURATION))
+                },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
+                    ) + fadeOut(tween(SLIDE_DURATION))
+                }
+            ) {
                 ProfileScreen(
                     onBackClick = { navController.popBackStack() },
-                    viewModel = searchViewModel
+                    viewModel   = searchViewModel
                 )
             }
         }
@@ -320,18 +357,68 @@ fun CineStackApp() {
 }
 
 @Composable
-fun PlaceholderScreen(name: String) {
-
+fun BottomNavBar(
+    items       : List<Screen>,
+    currentDest : androidx.navigation.NavDestination?,
+    onItemClick : (Screen) -> Unit
+) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        Text(
-            text = name,
-            style = MaterialTheme.typography.headlineLarge,
-            color = Color.White
-        )
+        Surface(
+            modifier      = Modifier.fillMaxWidth().height(64.dp),
+            shape         = CircleShape,
+            color         = Color(0xFF1A1A1A).copy(alpha = 0.95f),
+            border        = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Brush.linearGradient(listOf(Color.White.copy(alpha = 0.12f), Color.Transparent))
+            ),
+            tonalElevation = 8.dp
+        ) {
+            Row(
+                modifier                = Modifier.fillMaxSize(),
+                horizontalArrangement   = Arrangement.SpaceEvenly,
+                verticalAlignment       = Alignment.CenterVertically
+            ) {
+                items.forEach { screen ->
+                    val selected     = currentDest?.hierarchy?.any { it.route == screen.route } == true
+                    val contentColor = if (selected) MaterialTheme.colorScheme.primary else Color.Gray
+                    // Ripple-free interaction — feels snappier than default ripple on pill nav
+                    val interactionSource = remember { MutableInteractionSource() }
+
+                    Box(
+                        modifier         = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication        = null  // no ripple lag
+                            ) { onItemClick(screen) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                screen.icon,
+                                contentDescription = screen.label,
+                                tint               = contentColor,
+                                modifier           = Modifier.size(22.dp)
+                            )
+                            // Animated indicator dot
+                            androidx.compose.animation.AnimatedVisibility(visible = selected) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 4.dp)
+                                        .size(4.dp)
+                                        .background(contentColor, CircleShape)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
