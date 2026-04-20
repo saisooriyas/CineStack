@@ -2,41 +2,97 @@ package com.example.cinestack.data.remote
 
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.QueryMap
 
 interface ThePornDbService {
 
-    // Text search — ?parse= matches against title
+    // Text search
     @GET("scenes")
     suspend fun searchScenes(
         @Header("Authorization") auth: String,
-        @Query("parse") query: String,
+        @Query("q") query: String,
         @Query("page") page: Int = 1,
-        @Query("limit") limit: Int = 20
+        @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
-    // Scenes filtered by one or more performer IDs
+    // Recently released scenes — used for discovery/trending shelf
+    @GET("scenes")
+    suspend fun getRecentScenes(
+        @Header("Authorization") auth: String,
+        @Query("orderBy") orderBy: String = "recently_released",
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Recently released movies on TPDB
+    @GET("movies")
+    suspend fun getRecentMovies(
+        @Header("Authorization") auth: String,
+        @Query("orderBy") orderBy: String = "recently_released",
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Search movies
+    @GET("movies")
+    suspend fun searchPDBMovies(
+        @Header("Authorization") auth: String,
+        @Query("q") query: String,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Scenes filtered by performer using QueryMap
     @GET("scenes")
     suspend fun searchScenesByCast(
         @Header("Authorization") auth: String,
-        @Query("cast[]") castIds: List<String>,   // API accepts multiple cast[] params
+        @QueryMap performers: Map<String, String>,
+        @Query("performer_and") performerAnd: Boolean = false,
         @Query("page") page: Int = 1,
-        @Query("limit") limit: Int = 20
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    @GET("movies")
+    suspend fun searchMoviessByCast(
+        @Header("Authorization") auth: String,
+        @QueryMap performers: Map<String, String>,
+        @Query("performer_and") performerAnd: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Dedicated performer scenes endpoint — most reliable for single performer
+    @GET("performers/{identifier}/scenes")
+    suspend fun getPerformerScenes(
+        @Header("Authorization") auth: String,
+        @Path("identifier") identifier: String,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    @GET("performers/{identifier}/movies")
+    suspend fun getPerformerMovies(
+        @Header("Authorization") auth: String,
+        @Path("identifier") identifier: String,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
     @GET("performers")
     suspend fun searchPerformers(
         @Header("Authorization") auth: String,
-        @Query("q") query: String
+        @Query("q") query: String,
+        @Query("per_page") limit: Int = 10
     ): PDBPerformerSearchResponse
-
 }
 
-// ── REST response models ──────────────────────────────────────────────────────
+// ── Response models ───────────────────────────────────────────────────────────
 
 data class PDBRestResponse(
-    val count: Int?,           // may be absent
-    val data: List<PDBRestScene>  // root array is "data", not "results"
+    val count: Int?,
+    val data: List<PDBRestScene>
 )
 
 data class PDBPerformerSearchResponse(
@@ -55,9 +111,9 @@ data class PDBRestScene(
     val date: String?,
     val duration: Int?,
     val background: PDBBackground?,
-    val posters: PDBPosters?,     // it's an object, not a list
+    val posters: PDBPosters?,
     val site: PDBRestSite?,
-    val performers: List<PDBRestPerformer>?,  // nullable — some scenes have no performers
+    val performers: List<PDBRestPerformer>?,
     val tags: List<PDBRestTag>?
 )
 

@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.example.cinestack"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.cinestack"
         minSdk = 32
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
 
