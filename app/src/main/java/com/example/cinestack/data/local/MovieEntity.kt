@@ -19,5 +19,7 @@ data class MovieEntity(
     val userRating: Double,
     val currentSeason: Int = 0,
     val currentEpisode: Int = 0,
-    val totalEpisodes: Int = 0
+    val totalEpisodes: Int = 0,
+    // Comma-separated cast names — used for XXX performer grouping
+    val castNames: String = ""
 )

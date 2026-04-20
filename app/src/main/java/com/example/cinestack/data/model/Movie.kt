@@ -15,7 +15,9 @@ data class Movie(
     val userRating: Double = 0.0,
     val currentSeason: Int = 0,
     val currentEpisode: Int = 0,
-    val totalEpisodes: Int = 0
+    val totalEpisodes: Int = 0,
+    // Comma-separated list of cast names (populated for XXX content)
+    val castNames: List<String> = emptyList()
 )
 
 val sampleMovies = listOf(

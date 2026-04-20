@@ -5,7 +5,15 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [MovieEntity::class, GroupEntity::class, GroupItemEntity::class], version = 10)
+@Database(
+    entities = [
+        MovieEntity::class,
+        GroupEntity::class,
+        GroupItemEntity::class,
+        StarredPerformerEntity::class
+    ],
+    version = 11
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun movieDao(): MovieDao
 
@@ -21,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "cinestack_database"
                 )
                     .fallbackToDestructiveMigration(true)
-                .build()
+                    .build()
                 INSTANCE = instance
                 instance
             }

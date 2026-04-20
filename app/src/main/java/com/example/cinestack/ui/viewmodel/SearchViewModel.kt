@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cinestack.data.local.AppDatabase
+import com.example.cinestack.data.local.StarredPerformerEntity
 import com.example.cinestack.data.model.Movie
 import com.example.cinestack.data.remote.PDBPerformerResult
 import com.example.cinestack.data.repository.MovieRepository
@@ -46,7 +47,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _discoveryShelf2 = MutableStateFlow<List<Movie>>(emptyList())
     val discoveryShelf2: StateFlow<List<Movie>> = _discoveryShelf2
 
-    private val _shelf1Label = MutableStateFlow("TRENDING NOW")
+    private val _shelf1Label = MutableStateFlow("TRENDING TODAY")
     val shelf1Label: StateFlow<String> = _shelf1Label
 
     private val _shelf2Label = MutableStateFlow("POPULAR MOVIES")
@@ -55,7 +56,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _isDiscoveryLoading = MutableStateFlow(false)
     val isDiscoveryLoading: StateFlow<Boolean> = _isDiscoveryLoading
 
-    // Legacy aliases for DashboardScreen
+    // Legacy aliases used by DashboardScreen (HomeScreen.kt)
     val trendingMovies: StateFlow<List<Movie>> = _discoveryShelf1
     val popularMovies: StateFlow<List<Movie>>  = _discoveryShelf2
 
@@ -74,14 +75,23 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _performerSuggestions = MutableStateFlow<List<PDBPerformerResult>>(emptyList())
     val performerSuggestions: StateFlow<List<PDBPerformerResult>> = _performerSuggestions
 
-    // Pair<id, name> so we can pass names to the API correctly
     private val _selectedCastIds = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     val selectedCastIds: StateFlow<List<Pair<String, String>>> = _selectedCastIds
 
+    // ── Starred performers ────────────────────────────────────────────────────
+    val starredPerformers: StateFlow<List<StarredPerformerEntity>>
+        get() = repository.starredPerformers
+
     // ── "See All" expanded shelf ──────────────────────────────────────────────
-    // Null = no expanded view, non-null = showing all items for that shelf
     private val _expandedShelf = MutableStateFlow<Pair<String, List<Movie>>?>(null)
     val expandedShelf: StateFlow<Pair<String, List<Movie>>?> = _expandedShelf
+
+    // ── Now Playing / Top Rated for Dashboard dynamic section ─────────────────
+    private val _nowPlayingMovies = MutableStateFlow<List<Movie>>(emptyList())
+    val nowPlayingMovies: StateFlow<List<Movie>> = _nowPlayingMovies
+
+    private val _topRatedMovies = MutableStateFlow<List<Movie>>(emptyList())
+    val topRatedMovies: StateFlow<List<Movie>> = _topRatedMovies
 
     private var discoveryJob: Job? = null
 
@@ -90,6 +100,18 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         repository = MovieRepository(database.movieDao())
         library = repository.library
         fetchDiscoveryForType("Movie")
+        fetchDashboardExtras()
+    }
+
+    private fun fetchDashboardExtras() {
+        viewModelScope.launch {
+            try {
+                val np = repository.getNowPlayingMovies()
+                updateCache(np); _nowPlayingMovies.value = np
+                val tr = repository.getTopRatedMovies()
+                updateCache(tr); _topRatedMovies.value = tr
+            } catch (e: Exception) { e.printStackTrace() }
+        }
     }
 
     private fun updateCache(movies: List<Movie>) {
@@ -101,14 +123,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         return movieCache[movieId] ?: library.value.find { it.id == movieId }
     }
 
-    // ── "See All" shelf expansion ─────────────────────────────────────────────
-    fun expandShelf(label: String, movies: List<Movie>) {
-        _expandedShelf.value = label to movies
-    }
-
-    fun closeExpandedShelf() {
-        _expandedShelf.value = null
-    }
+    fun expandShelf(label: String, movies: List<Movie>) { _expandedShelf.value = label to movies }
+    fun closeExpandedShelf() { _expandedShelf.value = null }
 
     // ── Discovery ─────────────────────────────────────────────────────────────
     fun fetchDiscoveryForType(type: String) {
@@ -160,11 +176,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                         updateCache(s2); _discoveryShelf2.value = s2
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                _isDiscoveryLoading.value = false
-            }
+            } catch (e: Exception) { e.printStackTrace() }
+            finally { _isDiscoveryLoading.value = false }
         }
     }
 
@@ -189,11 +202,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 _searchResults.value  = results
                 _hasMoreResults.value = results.size >= 20
                 updateCache(results)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                _isLoading.value = false
-            }
+            } catch (e: Exception) { e.printStackTrace() }
+            finally { _isLoading.value = false }
         }
     }
 
@@ -204,11 +214,8 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onTypeSelected(type: String) {
         _selectedType.value = type
-        if (_searchQuery.value.isNotBlank()) {
-            search(_searchQuery.value, type, page = 1)
-        } else {
-            fetchDiscoveryForType(type)
-        }
+        if (_searchQuery.value.isNotBlank()) search(_searchQuery.value, type, page = 1)
+        else fetchDiscoveryForType(type)
     }
 
     fun fetchCast(movieId: String, type: String = "movie") {
@@ -216,8 +223,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             _cast.value = repository.getCast(movieId, type)
             _movieDetails.value = repository.getMovieDetails(movieId, type)
             val recs = repository.getRecommendations(movieId, type)
-            updateCache(recs)
-            _recommendations.value = recs
+            updateCache(recs); _recommendations.value = recs
         }
     }
 
@@ -242,7 +248,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         return movie
     }
 
-    // ── Performer / cast filter ───────────────────────────────────────────────
+    // ── Performer search & cast filter ────────────────────────────────────────
     fun searchPerformers(query: String) {
         viewModelScope.launch {
             if (query.length < 2) { _performerSuggestions.value = emptyList(); return@launch }
@@ -275,14 +281,22 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         val isMovieMode = _selectedType.value == "XXX Movies"
         viewModelScope.launch {
             _isLoading.value = true
-            _searchResults.value = if (isMovieMode) {
+            _searchResults.value = if (isMovieMode)
                 repository.searchPDBMoviesByCast(ids, names)
-            } else {
+            else
                 repository.searchPDBScenesByCast(ids, names)
-            }
             _isLoading.value = false
         }
     }
+
+    // ── Starred Performers ────────────────────────────────────────────────────
+    fun starPerformer(id: String, name: String, imageUrl: String) {
+        repository.starPerformer(StarredPerformerEntity(id = id, name = name, imageUrl = imageUrl))
+    }
+
+    fun unstarPerformer(id: String) = repository.unstarPerformer(id)
+
+    fun isPerformerStarred(id: String): Boolean = repository.isPerformerStarred(id)
 
     // ── Groups ────────────────────────────────────────────────────────────────
     val allGroups = repository.allGroups

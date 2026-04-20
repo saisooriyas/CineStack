@@ -5,6 +5,7 @@ import com.example.cinestack.data.local.GroupEntity
 import com.example.cinestack.data.local.GroupItemEntity
 import com.example.cinestack.data.local.MovieDao
 import com.example.cinestack.data.local.MovieEntity
+import com.example.cinestack.data.local.StarredPerformerEntity
 import com.example.cinestack.data.model.Movie
 import com.example.cinestack.data.remote.ApiService
 import com.example.cinestack.data.remote.PDBPerformerResult
@@ -28,7 +29,6 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 class MovieRepository(private val movieDao: MovieDao) {
 
-    // ── API keys ──────────────────────────────────────────────────────────────
     private var tmdbApiKey = BuildConfig.TMDB_API_KEY
     private val tpdbApiKey = BuildConfig.TPDB_API_KEY
 
@@ -36,13 +36,11 @@ class MovieRepository(private val movieDao: MovieDao) {
         if (newKey.isNotBlank()) tmdbApiKey = newKey
     }
 
-    // ── HTTP client (shared) ──────────────────────────────────────────────────
     private val okHttpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
         OkHttpClient.Builder().addInterceptor(logging).build()
     }
 
-    // ── TMDB + Jikan Retrofit ─────────────────────────────────────────────────
     private val apiService: ApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.themoviedb.org/3/")
@@ -52,7 +50,6 @@ class MovieRepository(private val movieDao: MovieDao) {
             .create(ApiService::class.java)
     }
 
-    // ── ThePornDB Retrofit ────────────────────────────────────────────────────
     private val pdbService: ThePornDbService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.theporndb.net/")
@@ -68,9 +65,7 @@ class MovieRepository(private val movieDao: MovieDao) {
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
-            movieDao.getAllMovies().collect { entities ->
-                _library.value = entities.map { it.toMovie() }
-            }
+            movieDao.getAllMovies().collect { _library.value = it.map { e -> e.toMovie() } }
         }
     }
 
@@ -88,6 +83,31 @@ class MovieRepository(private val movieDao: MovieDao) {
 
     fun isInLibrary(movieId: String): Boolean = _library.value.any { it.id == movieId }
 
+    // ── Starred Performers ────────────────────────────────────────────────────
+    private val _starredPerformers = MutableStateFlow<List<StarredPerformerEntity>>(emptyList())
+    val starredPerformers: StateFlow<List<StarredPerformerEntity>> = _starredPerformers.asStateFlow()
+
+    init {
+        CoroutineScope(Dispatchers.IO).launch {
+            movieDao.getAllStarredPerformers().collect { _starredPerformers.value = it }
+        }
+    }
+
+    fun starPerformer(performer: StarredPerformerEntity) {
+        CoroutineScope(Dispatchers.IO).launch { movieDao.insertStarredPerformer(performer) }
+    }
+
+    fun unstarPerformer(performerId: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            _starredPerformers.value.find { it.id == performerId }?.let {
+                movieDao.deleteStarredPerformer(it)
+            }
+        }
+    }
+
+    fun isPerformerStarred(performerId: String): Boolean =
+        _starredPerformers.value.any { it.id == performerId }
+
     // ── Groups ────────────────────────────────────────────────────────────────
     private val _allGroups = MutableStateFlow<List<GroupEntity>>(emptyList())
     val allGroups: StateFlow<List<GroupEntity>> = _allGroups.asStateFlow()
@@ -99,8 +119,8 @@ class MovieRepository(private val movieDao: MovieDao) {
     }
 
     suspend fun getGroupItems(groupId: Int) = movieDao.getGroupItems(groupId)
-    suspend fun getSubGroups(parentId: Int)  = movieDao.getSubGroups(parentId)
-    suspend fun getGroupById(groupId: Int)   = movieDao.getGroupById(groupId)
+    suspend fun getSubGroups(parentId: Int) = movieDao.getSubGroups(parentId)
+    suspend fun getGroupById(groupId: Int) = movieDao.getGroupById(groupId)
 
     fun createGroup(name: String, parentId: Int? = null) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -116,25 +136,16 @@ class MovieRepository(private val movieDao: MovieDao) {
 
     fun addItemToGroup(groupId: Int, movie: Movie) {
         CoroutineScope(Dispatchers.IO).launch {
-            movieDao.insertGroupItem(GroupItemEntity(
-                groupId    = groupId,
-                type       = "MOVIE",
-                externalId = movie.id,
-                title      = movie.title,
-                imageUrl   = movie.posterUrl
-            ))
+            movieDao.insertGroupItem(GroupItemEntity(groupId = groupId, type = "MOVIE",
+                externalId = movie.id, title = movie.title, imageUrl = movie.posterUrl))
         }
     }
 
     fun addPersonToGroup(groupId: Int, cast: TMDBCast) {
         CoroutineScope(Dispatchers.IO).launch {
-            movieDao.insertGroupItem(GroupItemEntity(
-                groupId    = groupId,
-                type       = "PERSON",
-                externalId = cast.id,
-                title      = cast.name,
-                imageUrl   = "https://image.tmdb.org/t/p/w500${cast.profilePath}"
-            ))
+            movieDao.insertGroupItem(GroupItemEntity(groupId = groupId, type = "PERSON",
+                externalId = cast.id, title = cast.name,
+                imageUrl = "https://image.tmdb.org/t/p/w500${cast.profilePath}"))
         }
     }
 
@@ -154,123 +165,76 @@ class MovieRepository(private val movieDao: MovieDao) {
     suspend fun searchAnime(query: String, page: Int = 1): List<Movie> =
         try {
             apiService.searchAnime(query, page = page).data.map { anime ->
-                Movie(
-                    id          = anime.malId,
-                    title       = anime.title,
-                    posterUrl   = anime.images.jpg.largeImageUrl,
-                    backdropUrl = anime.images.jpg.largeImageUrl,
-                    rating      = anime.score ?: 0.0,
-                    genre       = listOf("Anime"),
-                    duration    = "${anime.episodes ?: "?"} eps",
-                    releaseYear = anime.year ?: 0,
-                    synopsis    = anime.synopsis ?: "",
-                    mediaType   = "anime"
-                )
+                Movie(id = anime.malId, title = anime.title, posterUrl = anime.images.jpg.largeImageUrl,
+                    backdropUrl = anime.images.jpg.largeImageUrl, rating = anime.score ?: 0.0,
+                    genre = listOf("Anime"), duration = "${anime.episodes ?: "?"} eps",
+                    releaseYear = anime.year ?: 0, synopsis = anime.synopsis ?: "", mediaType = "anime")
             }
         } catch (e: Exception) { emptyList() }
 
     suspend fun searchPDBScenes(query: String, page: Int = 1): List<Movie> =
-        try {
-            pdbService.searchScenes("Bearer $tpdbApiKey", query, page).data.map { it.toMovie("xxx") }
-        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+        try { pdbService.searchScenes("Bearer $tpdbApiKey", query, page).data.map { it.toMovie("xxx") } }
+        catch (e: Exception) { e.printStackTrace(); emptyList() }
 
     suspend fun searchPDBMoviesText(query: String, page: Int = 1): List<Movie> =
-        try {
-            pdbService.searchPDBMovies("Bearer $tpdbApiKey", query, page).data.map { it.toMovie("xxx_movie") }
-        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+        try { pdbService.searchPDBMovies("Bearer $tpdbApiKey", query, page).data.map { it.toMovie("xxx_movie") } }
+        catch (e: Exception) { e.printStackTrace(); emptyList() }
 
     suspend fun searchPerformers(query: String): List<PDBPerformerResult> =
         try { pdbService.searchPerformers("Bearer $tpdbApiKey", query).data }
         catch (e: Exception) { emptyList() }
 
-    /**
-     * Search scenes by cast IDs.
-     * Fix: TPDB QueryMap format must be "performers[ID]" -> "Name".
-     * For a single performer, use the dedicated endpoint which is more reliable.
-     */
     suspend fun searchPDBScenesByCast(castIds: List<String>, castNames: Map<String, String>, page: Int = 1): List<Movie> {
         return try {
             if (castIds.size == 1) {
-                pdbService.getPerformerScenes(
-                    auth       = "Bearer $tpdbApiKey",
-                    identifier = castIds.first(),
-                    page       = page
-                ).data.map { it.toMovie("xxx") }
+                pdbService.getPerformerScenes("Bearer $tpdbApiKey", castIds.first(), page)
+                    .data.map { it.toMovie("xxx") }
             } else {
-                // Build map: "performers[ID]" -> "Name" — this is what TPDB expects
-                val performersMap = castIds.associate { id ->
-                    "performers[$id]" to (castNames[id] ?: id)
-                }
-                pdbService.searchScenesByPerformers(
-                    auth         = "Bearer $tpdbApiKey",
-                    performers   = performersMap,
-                    performerAnd = false,
-                    page         = page
-                ).data.map { it.toMovie("xxx") }
+                val map = castIds.associate { id -> "performers[$id]" to (castNames[id] ?: id) }
+                pdbService.searchScenesByPerformers("Bearer $tpdbApiKey", map, false, page)
+                    .data.map { it.toMovie("xxx") }
             }
         } catch (e: Exception) { e.printStackTrace(); emptyList() }
     }
 
-    /**
-     * Search movies by cast IDs on TPDB.
-     */
     suspend fun searchPDBMoviesByCast(castIds: List<String>, castNames: Map<String, String>, page: Int = 1): List<Movie> {
         return try {
             if (castIds.size == 1) {
-                pdbService.getPerformerMovies(
-                    auth       = "Bearer $tpdbApiKey",
-                    identifier = castIds.first(),
-                    page       = page
-                ).data.map { it.toMovie("xxx_movie") }
+                pdbService.getPerformerMovies("Bearer $tpdbApiKey", castIds.first(), page)
+                    .data.map { it.toMovie("xxx_movie") }
             } else {
-                val performersMap = castIds.associate { id ->
-                    "performers[$id]" to (castNames[id] ?: id)
-                }
-                pdbService.searchMoviesByPerformers(
-                    auth         = "Bearer $tpdbApiKey",
-                    performers   = performersMap,
-                    performerAnd = false,
-                    page         = page
-                ).data.map { it.toMovie("xxx_movie") }
+                val map = castIds.associate { id -> "performers[$id]" to (castNames[id] ?: id) }
+                pdbService.searchMoviesByPerformers("Bearer $tpdbApiKey", map, false, page)
+                    .data.map { it.toMovie("xxx_movie") }
             }
         } catch (e: Exception) { e.printStackTrace(); emptyList() }
     }
 
-    // ── Discovery — Movie ─────────────────────────────────────────────────────
+    // ── Discovery ─────────────────────────────────────────────────────────────
     suspend fun getTrendingMovies(): List<Movie> =
-        try { apiService.getTrendingMovies(tmdbApiKey).results.map { it.toMovie("movie") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getTrendingMovies(tmdbApiKey).results.map { it.toMovie("movie") } } catch (e: Exception) { emptyList() }
 
     suspend fun getPopularMovies(): List<Movie> =
-        try { apiService.getPopularMovies(tmdbApiKey).results.map { it.toMovie("movie") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getPopularMovies(tmdbApiKey).results.map { it.toMovie("movie") } } catch (e: Exception) { emptyList() }
 
     suspend fun getNowPlayingMovies(): List<Movie> =
-        try { apiService.getNowPlayingMovies(tmdbApiKey).results.map { it.toMovie("movie") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getNowPlayingMovies(tmdbApiKey).results.map { it.toMovie("movie") } } catch (e: Exception) { emptyList() }
 
     suspend fun getTopRatedMovies(): List<Movie> =
-        try { apiService.getTopRatedMovies(tmdbApiKey).results.map { it.toMovie("movie") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getTopRatedMovies(tmdbApiKey).results.map { it.toMovie("movie") } } catch (e: Exception) { emptyList() }
 
-    // ── Discovery — TV ────────────────────────────────────────────────────────
     suspend fun getTrendingTV(): List<Movie> =
-        try { apiService.getTrendingTV(tmdbApiKey).results.map { it.toMovie("tv") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getTrendingTV(tmdbApiKey).results.map { it.toMovie("tv") } } catch (e: Exception) { emptyList() }
 
     suspend fun getPopularTV(): List<Movie> =
-        try { apiService.getPopularTV(tmdbApiKey).results.map { it.toMovie("tv") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getPopularTV(tmdbApiKey).results.map { it.toMovie("tv") } } catch (e: Exception) { emptyList() }
 
     suspend fun getTopRatedTV(): List<Movie> =
-        try { apiService.getTopRatedTV(tmdbApiKey).results.map { it.toMovie("tv") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getTopRatedTV(tmdbApiKey).results.map { it.toMovie("tv") } } catch (e: Exception) { emptyList() }
 
     suspend fun getOnAirTV(): List<Movie> =
-        try { apiService.getOnAirTV(tmdbApiKey).results.map { it.toMovie("tv") } }
-        catch (e: Exception) { emptyList() }
+        try { apiService.getOnAirTV(tmdbApiKey).results.map { it.toMovie("tv") } } catch (e: Exception) { emptyList() }
 
-    // ── Discovery — Anime ─────────────────────────────────────────────────────
     suspend fun getTopAiringAnime(): List<Movie> =
         try {
             apiService.getTopAnime(filter = "airing", limit = 20).data.map { anime ->
@@ -291,7 +255,6 @@ class MovieRepository(private val movieDao: MovieDao) {
             }
         } catch (e: Exception) { emptyList() }
 
-    // ── Discovery — XXX ───────────────────────────────────────────────────────
     suspend fun getRecentXxxScenes(): List<Movie> =
         try { pdbService.getRecentScenes("Bearer $tpdbApiKey", "recently_released").data.map { it.toMovie("xxx") } }
         catch (e: Exception) { emptyList() }
@@ -300,22 +263,19 @@ class MovieRepository(private val movieDao: MovieDao) {
         try { pdbService.getRecentMovies("Bearer $tpdbApiKey", "recently_released").data.map { it.toMovie("xxx_movie") } }
         catch (e: Exception) { emptyList() }
 
-    // ── Details / Cast / Recommendations ─────────────────────────────────────
+    // ── Details ───────────────────────────────────────────────────────────────
     suspend fun getCast(movieId: String, type: String = "movie"): List<TMDBCast> {
         if (type == "anime" || type == "xxx" || type == "xxx_movie") return emptyList()
-        return try { apiService.getCredits(type, movieId, tmdbApiKey).cast }
-        catch (e: Exception) { emptyList() }
+        return try { apiService.getCredits(type, movieId, tmdbApiKey).cast } catch (e: Exception) { emptyList() }
     }
 
     suspend fun getMovieDetails(movieId: String, type: String = "movie"): TMDBMovieDetailsResponse? {
         if (type == "anime" || type == "xxx" || type == "xxx_movie") return null
-        return try { apiService.getDetails(type, movieId, tmdbApiKey) }
-        catch (e: Exception) { null }
+        return try { apiService.getDetails(type, movieId, tmdbApiKey) } catch (e: Exception) { null }
     }
 
     suspend fun getPersonDetails(personId: String): TMDBPersonDetails? =
-        try { apiService.getPersonDetails(personId, tmdbApiKey) }
-        catch (e: Exception) { null }
+        try { apiService.getPersonDetails(personId, tmdbApiKey) } catch (e: Exception) { null }
 
     suspend fun getRecommendations(movieId: String, type: String = "movie"): List<Movie> {
         if (type == "anime" || type == "xxx" || type == "xxx_movie") return emptyList()
@@ -324,87 +284,59 @@ class MovieRepository(private val movieDao: MovieDao) {
     }
 
     fun mapCombinedCreditToMovie(credit: TMDBCombinedCredit) = Movie(
-        id          = credit.id,
-        title       = credit.title ?: credit.name ?: "Unknown",
-        posterUrl   = "https://image.tmdb.org/t/p/w500${credit.posterPath}",
+        id = credit.id, title = credit.title ?: credit.name ?: "Unknown",
+        posterUrl = "https://image.tmdb.org/t/p/w500${credit.posterPath}",
         backdropUrl = "https://image.tmdb.org/t/p/original${credit.backdropPath}",
-        rating      = credit.voteAverage,
-        genre       = listOf(if (credit.mediaType == "tv") "TV Series" else "Movie"),
-        duration    = "N/A",
-        releaseYear = (credit.releaseDate ?: credit.firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
-        synopsis    = credit.overview ?: "",
-        mediaType   = credit.mediaType
+        rating = credit.voteAverage, genre = listOf(if (credit.mediaType == "tv") "TV Series" else "Movie"),
+        duration = "N/A", releaseYear = (credit.releaseDate ?: credit.firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
+        synopsis = credit.overview ?: "", mediaType = credit.mediaType
     )
 
     // ── Mappers ───────────────────────────────────────────────────────────────
-    private fun PDBRestScene.toMovie(type: String = "xxx") = Movie(
-        id          = id,
-        title       = title,
-        posterUrl   = background?.full ?: background?.medium ?: posters?.full ?: posters?.medium ?: "",
-        backdropUrl = background?.full ?: "",
-        rating      = 0.0,
-        genre       = listOf(site?.name ?: if (type == "xxx_movie") "XXX Movie" else "XXX"),
-        duration    = duration?.let { "${it / 60} min" } ?: "N/A",
-        releaseYear = date?.take(4)?.toIntOrNull() ?: 0,
-        synopsis    = buildString {
-            val names = performers?.mapNotNull { it.name }?.filter { it.isNotBlank() }
-            if (!names.isNullOrEmpty()) append(names.joinToString(", "))
-            site?.name?.let { if (isNotEmpty()) append(" · "); append(it) }
-        },
-        mediaType = type
-    )
+    private fun PDBRestScene.toMovie(type: String = "xxx"): Movie {
+        val castList = performers?.mapNotNull { it.name }?.filter { it.isNotBlank() } ?: emptyList()
+        return Movie(
+            id = id, title = title,
+            posterUrl = background?.full ?: background?.medium ?: posters?.full ?: posters?.medium ?: "",
+            backdropUrl = background?.full ?: "", rating = 0.0,
+            genre = listOf(site?.name ?: if (type == "xxx_movie") "XXX Movie" else "XXX"),
+            duration = duration?.let { "${it / 60} min" } ?: "N/A",
+            releaseYear = date?.take(4)?.toIntOrNull() ?: 0,
+            synopsis = buildString {
+                if (castList.isNotEmpty()) append(castList.joinToString(", "))
+                site?.name?.let { if (isNotEmpty()) append(" · "); append(it) }
+            },
+            mediaType = type, castNames = castList
+        )
+    }
 
     private fun TMDBMovie.toMovie(type: String = "movie") = Movie(
-        id          = id,
-        title       = title ?: name ?: "Unknown",
-        posterUrl   = "https://image.tmdb.org/t/p/w500$posterPath",
+        id = id, title = title ?: name ?: "Unknown",
+        posterUrl = "https://image.tmdb.org/t/p/w500$posterPath",
         backdropUrl = "https://image.tmdb.org/t/p/original$backdropPath",
-        rating      = voteAverage,
-        genre       = listOf(if (type == "tv") "TV Series" else "Movie"),
-        duration    = "N/A",
-        releaseYear = (releaseDate ?: firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
-        synopsis    = overview,
-        mediaType   = type
+        rating = voteAverage, genre = listOf(if (type == "tv") "TV Series" else "Movie"),
+        duration = "N/A", releaseYear = (releaseDate ?: firstAirDate)?.take(4)?.toIntOrNull() ?: 0,
+        synopsis = overview, mediaType = type
     )
 
     private fun MovieEntity.toMovie() = Movie(
-        id             = id,
-        title          = title,
-        posterUrl      = posterUrl,
-        backdropUrl    = backdropUrl,
-        rating         = rating,
-        genre          = genres.split(","),
-        duration       = duration,
-        releaseYear    = releaseYear,
-        synopsis       = synopsis,
-        mediaType      = mediaType,
-        userStatus     = userStatus,
-        userRating     = userRating,
-        currentSeason  = currentSeason,
-        currentEpisode = currentEpisode,
-        totalEpisodes  = totalEpisodes
+        id = id, title = title, posterUrl = posterUrl, backdropUrl = backdropUrl,
+        rating = rating, genre = genres.split(","), duration = duration,
+        releaseYear = releaseYear, synopsis = synopsis, mediaType = mediaType,
+        userStatus = userStatus, userRating = userRating,
+        currentSeason = currentSeason, currentEpisode = currentEpisode, totalEpisodes = totalEpisodes,
+        castNames = if (castNames.isBlank()) emptyList() else castNames.split(",")
     )
 
     private fun Movie.toEntity(
-        status: String = userStatus,
-        score: Double  = userRating,
-        season: Int    = currentSeason,
-        episode: Int   = currentEpisode
+        status: String = userStatus, score: Double = userRating,
+        season: Int = currentSeason, episode: Int = currentEpisode
     ) = MovieEntity(
-        id             = id,
-        title          = title,
-        posterUrl      = posterUrl,
-        backdropUrl    = backdropUrl,
-        rating         = rating,
-        genres         = genre.joinToString(","),
-        duration       = duration,
-        releaseYear    = releaseYear,
-        synopsis       = synopsis,
-        mediaType      = mediaType,
-        userStatus     = status,
-        userRating     = score,
-        currentSeason  = season,
-        currentEpisode = episode,
-        totalEpisodes  = totalEpisodes
+        id = id, title = title, posterUrl = posterUrl, backdropUrl = backdropUrl,
+        rating = rating, genres = genre.joinToString(","), duration = duration,
+        releaseYear = releaseYear, synopsis = synopsis, mediaType = mediaType,
+        userStatus = status, userRating = score, currentSeason = season,
+        currentEpisode = episode, totalEpisodes = totalEpisodes,
+        castNames = castNames.joinToString(",")
     )
 }

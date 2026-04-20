@@ -44,4 +44,17 @@ interface MovieDao {
 
     @Delete
     suspend fun deleteGroupItem(item: GroupItemEntity)
+
+    // Starred performer methods
+    @Query("SELECT * FROM starred_performers")
+    fun getAllStarredPerformers(): Flow<List<StarredPerformerEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStarredPerformer(performer: StarredPerformerEntity)
+
+    @Delete
+    suspend fun deleteStarredPerformer(performer: StarredPerformerEntity)
+
+    @Query("SELECT EXISTS(SELECT * FROM starred_performers WHERE id = :id)")
+    suspend fun isPerformerStarred(id: String): Boolean
 }
