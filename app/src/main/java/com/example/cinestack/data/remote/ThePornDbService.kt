@@ -8,7 +8,7 @@ import retrofit2.http.QueryMap
 
 interface ThePornDbService {
 
-    // Text search
+    // Text search — Scenes
     @GET("scenes")
     suspend fun searchScenes(
         @Header("Authorization") auth: String,
@@ -17,25 +17,7 @@ interface ThePornDbService {
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
-    // Recently released scenes — used for discovery/trending shelf
-    @GET("scenes")
-    suspend fun getRecentScenes(
-        @Header("Authorization") auth: String,
-        @Query("orderBy") orderBy: String = "recently_released",
-        @Query("page") page: Int = 1,
-        @Query("per_page") limit: Int = 20
-    ): PDBRestResponse
-
-    // Recently released movies on TPDB
-    @GET("movies")
-    suspend fun getRecentMovies(
-        @Header("Authorization") auth: String,
-        @Query("orderBy") orderBy: String = "recently_released",
-        @Query("page") page: Int = 1,
-        @Query("per_page") limit: Int = 20
-    ): PDBRestResponse
-
-    // Search movies
+    // Text search — Movies
     @GET("movies")
     suspend fun searchPDBMovies(
         @Header("Authorization") auth: String,
@@ -44,26 +26,25 @@ interface ThePornDbService {
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
-    // Scenes filtered by performer using QueryMap
+    // Recently released scenes
     @GET("scenes")
-    suspend fun searchScenesByCast(
+    suspend fun getRecentScenes(
         @Header("Authorization") auth: String,
-        @QueryMap performers: Map<String, String>,
-        @Query("performer_and") performerAnd: Boolean = false,
+        @Query("orderBy") orderBy: String = "recently_released",
         @Query("page") page: Int = 1,
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
+    // Recently released movies
     @GET("movies")
-    suspend fun searchMoviessByCast(
+    suspend fun getRecentMovies(
         @Header("Authorization") auth: String,
-        @QueryMap performers: Map<String, String>,
-        @Query("performer_and") performerAnd: Boolean = false,
+        @Query("orderBy") orderBy: String = "recently_released",
         @Query("page") page: Int = 1,
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
-    // Dedicated performer scenes endpoint — most reliable for single performer
+    // Single performer scenes — most reliable for one performer
     @GET("performers/{identifier}/scenes")
     suspend fun getPerformerScenes(
         @Header("Authorization") auth: String,
@@ -72,6 +53,7 @@ interface ThePornDbService {
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
+    // Single performer movies
     @GET("performers/{identifier}/movies")
     suspend fun getPerformerMovies(
         @Header("Authorization") auth: String,
@@ -80,6 +62,29 @@ interface ThePornDbService {
         @Query("per_page") limit: Int = 20
     ): PDBRestResponse
 
+    // Multi-performer scene search via QueryMap
+    // TPDB expects: performers[ID1]=Name1&performers[ID2]=Name2
+    // Retrofit QueryMap encodes keys as-is, so pass "performers[ID]" as the key
+    @GET("scenes")
+    suspend fun searchScenesByPerformers(
+        @Header("Authorization") auth: String,
+        @QueryMap(encoded = false) performers: Map<String, String>,
+        @Query("performer_and") performerAnd: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Multi-performer movie search via QueryMap
+    @GET("movies")
+    suspend fun searchMoviesByPerformers(
+        @Header("Authorization") auth: String,
+        @QueryMap(encoded = false) performers: Map<String, String>,
+        @Query("performer_and") performerAnd: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("per_page") limit: Int = 20
+    ): PDBRestResponse
+
+    // Performer search
     @GET("performers")
     suspend fun searchPerformers(
         @Header("Authorization") auth: String,
