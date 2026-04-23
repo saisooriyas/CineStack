@@ -56,7 +56,6 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _isDiscoveryLoading = MutableStateFlow(false)
     val isDiscoveryLoading: StateFlow<Boolean> = _isDiscoveryLoading
 
-    // Legacy aliases used by DashboardScreen (HomeScreen.kt)
     val trendingMovies: StateFlow<List<Movie>> = _discoveryShelf1
     val popularMovies: StateFlow<List<Movie>>  = _discoveryShelf2
 
@@ -75,6 +74,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _performerSuggestions = MutableStateFlow<List<PDBPerformerResult>>(emptyList())
     val performerSuggestions: StateFlow<List<PDBPerformerResult>> = _performerSuggestions
 
+    // Pair<id, name>
     private val _selectedCastIds = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     val selectedCastIds: StateFlow<List<Pair<String, String>>> = _selectedCastIds
 
@@ -86,7 +86,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val _expandedShelf = MutableStateFlow<Pair<String, List<Movie>>?>(null)
     val expandedShelf: StateFlow<Pair<String, List<Movie>>?> = _expandedShelf
 
-    // ── Now Playing / Top Rated for Dashboard dynamic section ─────────────────
+    // ── Dashboard extras ──────────────────────────────────────────────────────
     private val _nowPlayingMovies = MutableStateFlow<List<Movie>>(emptyList())
     val nowPlayingMovies: StateFlow<List<Movie>> = _nowPlayingMovies
 
@@ -114,7 +114,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun updateCache(movies: List<Movie>) {
+    fun updateCache(movies: List<Movie>) {
         movies.forEach { movieCache[it.id] = it }
     }
 
@@ -136,40 +136,35 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 when (type) {
                     "Movie" -> {
-                        _shelf1Label.value = "TRENDING TODAY"
-                        _shelf2Label.value = "POPULAR MOVIES"
+                        _shelf1Label.value = "TRENDING TODAY"; _shelf2Label.value = "POPULAR MOVIES"
                         val s1 = repository.getTrendingMovies().distinctBy { it.id }
                         updateCache(s1); _discoveryShelf1.value = s1
                         val s2 = repository.getPopularMovies().distinctBy { it.id }
                         updateCache(s2); _discoveryShelf2.value = s2
                     }
                     "TV" -> {
-                        _shelf1Label.value = "TRENDING TV TODAY"
-                        _shelf2Label.value = "POPULAR SERIES"
+                        _shelf1Label.value = "TRENDING TV TODAY"; _shelf2Label.value = "POPULAR SERIES"
                         val s1 = repository.getTrendingTV().distinctBy { it.id }
                         updateCache(s1); _discoveryShelf1.value = s1
                         val s2 = repository.getPopularTV().distinctBy { it.id }
                         updateCache(s2); _discoveryShelf2.value = s2
                     }
                     "Anime" -> {
-                        _shelf1Label.value = "TOP AIRING ANIME"
-                        _shelf2Label.value = "MOST POPULAR"
+                        _shelf1Label.value = "TOP AIRING ANIME"; _shelf2Label.value = "MOST POPULAR"
                         val s1 = repository.getTopAiringAnime().distinctBy { it.id }
                         updateCache(s1); _discoveryShelf1.value = s1
                         val s2 = repository.getTopAnimeByPopularity().distinctBy { it.id }
                         updateCache(s2); _discoveryShelf2.value = s2
                     }
                     "XXX Scenes" -> {
-                        _shelf1Label.value = "RECENTLY RELEASED SCENES"
-                        _shelf2Label.value = "RECENT XXX MOVIES"
+                        _shelf1Label.value = "RECENTLY RELEASED SCENES"; _shelf2Label.value = "RECENT XXX MOVIES"
                         val s1 = repository.getRecentXxxScenes().distinctBy { it.id }
                         updateCache(s1); _discoveryShelf1.value = s1
                         val s2 = repository.getRecentXxxMovies().distinctBy { it.id }
                         updateCache(s2); _discoveryShelf2.value = s2
                     }
                     "XXX Movies" -> {
-                        _shelf1Label.value = "RECENT XXX MOVIES"
-                        _shelf2Label.value = "RECENTLY RELEASED SCENES"
+                        _shelf1Label.value = "RECENT XXX MOVIES"; _shelf2Label.value = "RECENTLY RELEASED SCENES"
                         val s1 = repository.getRecentXxxMovies().distinctBy { it.id }
                         updateCache(s1); _discoveryShelf1.value = s1
                         val s2 = repository.getRecentXxxScenes().distinctBy { it.id }
@@ -182,10 +177,29 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
+    /**
+     * Unified search entry point.
+     *
+     * For XXX types with active cast filters: sends BOTH the text query and the
+     * performer IDs to TPDB in a single request — exactly what the website does:
+     *   /scenes?q=american+milf&performers[82895]=Brandi+Love&performer_and=1
+     *
+     * For all other cases: plain text search.
+     */
     fun search(query: String, type: String = _selectedType.value, page: Int = 1) {
         _searchQuery.value  = query
         _selectedType.value = type
         _currentPage.value  = page
+
+        val isXxx   = type == "XXX Scenes" || type == "XXX Movies"
+        val hasCast = _selectedCastIds.value.isNotEmpty()
+
+        if (isXxx && hasCast) {
+            // Pass query + cast to the combined TPDB endpoint
+            runXxxSearch(query, type, page)
+            return
+        }
+
         if (query.isBlank()) { _searchResults.value = emptyList(); return }
 
         viewModelScope.launch {
@@ -214,10 +228,100 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onTypeSelected(type: String) {
         _selectedType.value = type
+        if (type != "XXX Scenes" && type != "XXX Movies") {
+            _selectedCastIds.value = emptyList()
+        }
         if (_searchQuery.value.isNotBlank()) search(_searchQuery.value, type, page = 1)
         else fetchDiscoveryForType(type)
     }
 
+    // ── Combined XXX search (text + cast → single TPDB request) ──────────────
+    private fun runXxxSearch(query: String, type: String, page: Int) {
+        val pairs       = _selectedCastIds.value
+        val ids         = pairs.map { it.first }
+        val names       = pairs.associate { it.first to it.second }
+        val isMovieMode = type == "XXX Movies"
+
+        // If no cast and no query — nothing to search
+        if (pairs.isEmpty() && query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        // If no cast but query exists — plain text search
+        if (pairs.isEmpty()) {
+            viewModelScope.launch {
+                _isLoading.value = true
+                try {
+                    val results = if (isMovieMode)
+                        repository.searchPDBMoviesText(query, page)
+                    else
+                        repository.searchPDBScenes(query, page)
+                    val distinct = results.distinctBy { it.id }
+                    _searchResults.value  = distinct
+                    _hasMoreResults.value = results.size >= 20
+                    updateCache(distinct)
+                } catch (e: Exception) { e.printStackTrace() }
+                finally { _isLoading.value = false }
+            }
+            return
+        }
+
+        // Cast filter present (with or without text) → combined TPDB request
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val results = if (isMovieMode)
+                    repository.searchPDBMoviesByCast(ids, names, query, page)
+                else
+                    repository.searchPDBScenesByCast(ids, names, query, page)
+                val distinct = results.distinctBy { it.id }
+                _searchResults.value  = distinct
+                _hasMoreResults.value = results.size >= 20
+                updateCache(distinct)
+            } catch (e: Exception) { e.printStackTrace() }
+            finally { _isLoading.value = false }
+        }
+    }
+
+    // ── Cast filter management ────────────────────────────────────────────────
+    fun searchPerformers(query: String) {
+        viewModelScope.launch {
+            if (query.length < 2) { _performerSuggestions.value = emptyList(); return@launch }
+            _performerSuggestions.value = repository.searchPerformers(query)
+        }
+    }
+
+    fun clearPerformerSuggestions() { _performerSuggestions.value = emptyList() }
+
+    fun addCastFilter(id: String, name: String) {
+        val current = _selectedCastIds.value.toMutableList()
+        if (current.none { it.first == id }) current.add(id to name)
+        _selectedCastIds.value = current
+        _performerSuggestions.value = emptyList()
+        // Re-run with existing text query + new cast filter
+        runXxxSearch(_searchQuery.value, _selectedType.value, 1)
+    }
+
+    fun removeCastFilter(id: String) {
+        _selectedCastIds.value = _selectedCastIds.value.filter { it.first != id }
+        if (_selectedCastIds.value.isEmpty() && _searchQuery.value.isBlank()) {
+            _searchResults.value = emptyList()
+        } else {
+            runXxxSearch(_searchQuery.value, _selectedType.value, 1)
+        }
+    }
+
+    fun clearCastFilters() {
+        _selectedCastIds.value = emptyList()
+        if (_searchQuery.value.isNotBlank()) {
+            search(_searchQuery.value, _selectedType.value, 1)
+        } else {
+            _searchResults.value = emptyList()
+        }
+    }
+
+    // ── Details ───────────────────────────────────────────────────────────────
     fun fetchCast(movieId: String, type: String = "movie") {
         viewModelScope.launch {
             _cast.value = repository.getCast(movieId, type)
@@ -233,6 +337,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearPersonDetails() { _personDetails.value = null }
 
+    // ── Library ───────────────────────────────────────────────────────────────
     fun addToLibrary(movie: Movie, status: String = "", rating: Double = 0.0, season: Int = 0, episode: Int = 0) {
         repository.addToLibrary(movie, status, rating, season, episode)
     }
@@ -248,54 +353,12 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         return movie
     }
 
-    // ── Performer search & cast filter ────────────────────────────────────────
-    fun searchPerformers(query: String) {
-        viewModelScope.launch {
-            if (query.length < 2) { _performerSuggestions.value = emptyList(); return@launch }
-            _performerSuggestions.value = repository.searchPerformers(query)
-        }
-    }
-
-    fun clearPerformerSuggestions() { _performerSuggestions.value = emptyList() }
-
-    fun addCastFilter(id: String, name: String) {
-        val current = _selectedCastIds.value.toMutableList()
-        if (current.none { it.first == id }) current.add(id to name)
-        _selectedCastIds.value = current
-        _performerSuggestions.value = emptyList()
-        searchByCast()
-    }
-
-    fun removeCastFilter(id: String) {
-        _selectedCastIds.value = _selectedCastIds.value.filter { it.first != id }
-        searchByCast()
-    }
-
-    fun clearCastFilters() { _selectedCastIds.value = emptyList() }
-
-    private fun searchByCast() {
-        val pairs = _selectedCastIds.value
-        if (pairs.isEmpty()) { _searchResults.value = emptyList(); return }
-        val ids   = pairs.map { it.first }
-        val names = pairs.associate { it.first to it.second }
-        val isMovieMode = _selectedType.value == "XXX Movies"
-        viewModelScope.launch {
-            _isLoading.value = true
-            _searchResults.value = if (isMovieMode)
-                repository.searchPDBMoviesByCast(ids, names)
-            else
-                repository.searchPDBScenesByCast(ids, names)
-            _isLoading.value = false
-        }
-    }
-
-    // ── Starred Performers ────────────────────────────────────────────────────
+    // ── Starred performers ────────────────────────────────────────────────────
     fun starPerformer(id: String, name: String, imageUrl: String) {
         repository.starPerformer(StarredPerformerEntity(id = id, name = name, imageUrl = imageUrl))
     }
 
     fun unstarPerformer(id: String) = repository.unstarPerformer(id)
-
     fun isPerformerStarred(id: String): Boolean = repository.isPerformerStarred(id)
 
     // ── Groups ────────────────────────────────────────────────────────────────

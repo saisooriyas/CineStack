@@ -13,40 +13,12 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.ViewCarousel
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -62,16 +34,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.cinestack.data.model.sampleMovies
-import com.example.cinestack.ui.screens.DashboardScreen
-import com.example.cinestack.ui.screens.DetailsScreen
-import com.example.cinestack.ui.screens.GroupDetailsScreen
-import com.example.cinestack.ui.screens.HomeScreen
-import com.example.cinestack.ui.screens.LibraryScreen
-import com.example.cinestack.ui.screens.PersonDetailsScreen
-import com.example.cinestack.ui.screens.ProfileScreen
+import com.example.cinestack.ui.screens.*
 import com.example.cinestack.ui.theme.CineStackTheme
 import com.example.cinestack.ui.viewmodel.SearchViewModel
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,7 +58,6 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Library  : Screen("library",   "LIBRARY",   Icons.Default.ViewCarousel)
 }
 
-// Transition durations
 private const val NAV_DURATION   = 280
 private const val SLIDE_DURATION = 320
 
@@ -184,7 +150,6 @@ fun CineStackApp() {
             modifier         = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            // Default enter/exit for all routes (fast fade)
             enterTransition  = { fadeIn(tween(NAV_DURATION)) },
             exitTransition   = { fadeOut(tween(NAV_DURATION)) },
             popEnterTransition  = { fadeIn(tween(NAV_DURATION)) },
@@ -194,7 +159,8 @@ fun CineStackApp() {
                 DashboardScreen(
                     viewModel   = searchViewModel,
                     onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                        val encodedId = URLEncoder.encode(movie.id, "UTF-8")
+                        navController.navigate("details/$encodedId/${movie.mediaType}")
                     }
                 )
             }
@@ -202,7 +168,8 @@ fun CineStackApp() {
             composable(Screen.Search.route) {
                 HomeScreen(
                     onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                        val encodedId = URLEncoder.encode(movie.id, "UTF-8")
+                        navController.navigate("details/$encodedId/${movie.mediaType}")
                     },
                     viewModel = searchViewModel
                 )
@@ -212,7 +179,8 @@ fun CineStackApp() {
                 LibraryScreen(
                     viewModel    = searchViewModel,
                     onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                        val encodedId = URLEncoder.encode(movie.id, "UTF-8")
+                        navController.navigate("details/$encodedId/${movie.mediaType}")
                     },
                     onGroupClick = { groupId ->
                         navController.navigate("group/$groupId")
@@ -220,40 +188,42 @@ fun CineStackApp() {
                 )
             }
 
-            // Detail screen — slides up from bottom
+            // Detail screen
             composable(
                 route = "details/{movieId}/{mediaType}",
                 enterTransition = {
                     slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
+                        initialOffsetX = { it },
                         animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
                     ) + fadeIn(tween(SLIDE_DURATION))
                 },
                 exitTransition = {
                     slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> -fullWidth / 3 },
+                        targetOffsetX = { -it / 3 },
                         animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
                     ) + fadeOut(tween(SLIDE_DURATION))
                 },
                 popEnterTransition = {
                     slideInHorizontally(
-                        initialOffsetX = { fullWidth -> -fullWidth / 3 },
+                        initialOffsetX = { -it / 3 },
                         animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
                     ) + fadeIn(tween(SLIDE_DURATION))
                 },
                 popExitTransition = {
                     slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
+                        targetOffsetX = { it },
                         animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
                     ) + fadeOut(tween(SLIDE_DURATION))
                 }
             ) { backStackEntry ->
-                val movieId = backStackEntry.arguments?.getString("movieId")
+                val rawId   = backStackEntry.arguments?.getString("movieId") ?: ""
+                val movieId = try { URLDecoder.decode(rawId, "UTF-8") } catch (e: Exception) { rawId }
                 val library by searchViewModel.library.collectAsState()
+
                 val movie = remember(movieId, library) {
                     searchViewModel.getMovieFromCache(movieId)
-                        ?: sampleMovies.find { it.id == movieId }
                 }
+
                 if (movie != null) {
                     DetailsScreen(
                         movie        = movie,
@@ -263,33 +233,37 @@ fun CineStackApp() {
                             navController.navigate("person/$personId")
                         },
                         onMovieClick = { selectedMovie ->
-                            navController.navigate("details/${selectedMovie.id}/${selectedMovie.mediaType}")
+                            val encodedId = URLEncoder.encode(selectedMovie.id, "UTF-8")
+                            navController.navigate("details/$encodedId/${selectedMovie.mediaType}")
                         }
                     )
                 } else {
+                    // Movie not in cache — show spinner briefly, then pop back
+                    // This only happens if the user somehow navigates to a stale URL
+                    LaunchedEffect(movieId) {
+                        kotlinx.coroutines.delay(3000)
+                        navController.popBackStack()
+                    }
                     Box(
                         modifier            = Modifier.fillMaxSize().background(Color.Black),
                         contentAlignment    = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Loading…", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
 
-            // Group, Person, Profile — slide in from right
             composable(
                 route = "group/{groupId}",
                 enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeIn(tween(SLIDE_DURATION))
+                    slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeIn(tween(SLIDE_DURATION))
                 },
                 popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeOut(tween(SLIDE_DURATION))
+                    slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeOut(tween(SLIDE_DURATION))
                 }
             ) { backStackEntry ->
                 val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: 0
@@ -298,7 +272,8 @@ fun CineStackApp() {
                     viewModel    = searchViewModel,
                     onBackClick  = { navController.popBackStack() },
                     onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                        val encodedId = URLEncoder.encode(movie.id, "UTF-8")
+                        navController.navigate("details/$encodedId/${movie.mediaType}")
                     },
                     onSubGroupClick = { subId ->
                         navController.navigate("group/$subId")
@@ -309,16 +284,10 @@ fun CineStackApp() {
             composable(
                 route = "person/{personId}",
                 enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeIn(tween(SLIDE_DURATION))
+                    slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeIn(tween(SLIDE_DURATION))
                 },
                 popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeOut(tween(SLIDE_DURATION))
+                    slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeOut(tween(SLIDE_DURATION))
                 }
             ) { backStackEntry ->
                 val personId = backStackEntry.arguments?.getString("personId") ?: ""
@@ -326,7 +295,8 @@ fun CineStackApp() {
                     personId     = personId,
                     onBackClick  = { navController.popBackStack() },
                     onMovieClick = { movie ->
-                        navController.navigate("details/${movie.id}/${movie.mediaType}")
+                        val encodedId = URLEncoder.encode(movie.id, "UTF-8")
+                        navController.navigate("details/$encodedId/${movie.mediaType}")
                     },
                     viewModel = searchViewModel
                 )
@@ -335,16 +305,10 @@ fun CineStackApp() {
             composable(
                 route = "profile",
                 enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec  = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeIn(tween(SLIDE_DURATION))
+                    slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeIn(tween(SLIDE_DURATION))
                 },
                 popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)
-                    ) + fadeOut(tween(SLIDE_DURATION))
+                    slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(SLIDE_DURATION, easing = EaseInOut)) + fadeOut(tween(SLIDE_DURATION))
                 }
             ) {
                 ProfileScreen(
@@ -386,7 +350,6 @@ fun BottomNavBar(
                 items.forEach { screen ->
                     val selected     = currentDest?.hierarchy?.any { it.route == screen.route } == true
                     val contentColor = if (selected) MaterialTheme.colorScheme.primary else Color.Gray
-                    // Ripple-free interaction — feels snappier than default ripple on pill nav
                     val interactionSource = remember { MutableInteractionSource() }
 
                     Box(
@@ -395,7 +358,7 @@ fun BottomNavBar(
                             .fillMaxHeight()
                             .clickable(
                                 interactionSource = interactionSource,
-                                indication        = null  // no ripple lag
+                                indication        = null
                             ) { onItemClick(screen) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -406,7 +369,6 @@ fun BottomNavBar(
                                 tint               = contentColor,
                                 modifier           = Modifier.size(22.dp)
                             )
-                            // Animated indicator dot
                             androidx.compose.animation.AnimatedVisibility(visible = selected) {
                                 Box(
                                     modifier = Modifier

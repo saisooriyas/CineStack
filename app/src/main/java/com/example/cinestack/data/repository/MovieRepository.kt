@@ -22,8 +22,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
+import org.json.JSONArray
+import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
@@ -153,7 +158,185 @@ class MovieRepository(private val movieDao: MovieDao) {
         CoroutineScope(Dispatchers.IO).launch { movieDao.deleteGroupItem(item) }
     }
 
-    // ── Search ────────────────────────────────────────────────────────────────
+    // ── Raw TPDB request using HttpUrl.Builder ────────────────────────────────
+    //
+    // Retrofit's @QueryMap always URL-encodes keys, turning performers[id] into
+    // performers%5Bid%5D which TPDB rejects. OkHttp's Request.Builder(url: String)
+    // also re-parses and re-encodes. The only safe way to keep square brackets
+    // raw is to build an HttpUrl with addEncodedQueryParameter() — that method
+    // takes keys and values that are ALREADY encoded and passes them through
+    // verbatim. Since square brackets are legal in query strings per RFC 3986
+    // and TPDB expects them literally, we just pass the key as-is.
+    //
+    // This produces exactly the same URL as the TPDB website:
+    //   /scenes?q=american+milf&performers[82895]=Brandi+Love&performer_and=1
+    //
+    private fun buildPdbHttpUrl(
+        endpoint: String,          // "scenes" or "movies"
+        query: String,             // text query, may be blank
+        castIds: List<String>,     // performer ids (integers or UUIDs)
+        castNames: Map<String, String>,
+        performerAnd: Boolean,     // true = must feature ALL performers
+        orderBy: String,           // e.g. "most_relevant"
+        page: Int
+    ): HttpUrl {
+        val builder = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.theporndb.net")
+            .addPathSegment(endpoint)
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("per_page", "20")
+            .addQueryParameter("orderBy", orderBy)
+            .addQueryParameter("performer_and", if (performerAnd) "1" else "0")
+
+        if (query.isNotBlank()) {
+            builder.addQueryParameter("q", query)
+        }
+
+        // addEncodedQueryParameter passes the key verbatim — brackets stay raw.
+        // We still encode the name value normally (spaces → %20 etc.)
+        castIds.forEach { id ->
+            val name = castNames[id] ?: ""
+            // Key:   performers[id]  — brackets intentionally NOT encoded
+            // Value: performer name  — encoded normally by addEncodedQueryParameter
+            builder.addEncodedQueryParameter(
+                "performers[$id]",
+                name.trim().replace(" ", "%20")
+            )
+        }
+
+        return builder.build()
+    }
+
+    private suspend fun rawPdbGet(url: HttpUrl): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(url)   // HttpUrl object — OkHttp uses it directly without re-encoding
+            .addHeader("Authorization", "Bearer $tpdbApiKey")
+            .build()
+        okHttpClient.newCall(request).execute().use { resp ->
+            resp.body?.string() ?: "{}"
+        }
+    }
+
+    private fun parsePdbResponse(json: String, type: String): List<Movie> {
+        return try {
+            val root = JSONObject(json)
+            val data = root.optJSONArray("data") ?: return emptyList()
+            (0 until data.length()).mapNotNull { i ->
+                try {
+                    val obj      = data.getJSONObject(i)
+                    val id       = obj.optString("id", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val title    = obj.optString("title", "Unknown")
+                    val date     = obj.optString("date", "")
+                    val dur      = obj.optInt("duration", 0)
+
+                    // Image resolution priority: background.full > background.medium > posters.full > posters.medium
+                    val bg       = obj.optJSONObject("background")
+                    val posters  = obj.optJSONObject("posters")
+                    val imageUrl = bg?.optString("full")?.takeIf { it.isNotBlank() }
+                        ?: bg?.optString("medium")?.takeIf { it.isNotBlank() }
+                        ?: posters?.optString("full")?.takeIf { it.isNotBlank() }
+                        ?: posters?.optString("medium")?.takeIf { it.isNotBlank() }
+                        ?: obj.optString("image", "")
+
+                    val site     = obj.optJSONObject("site")?.optString("name", "") ?: ""
+
+                    val perfArr  = obj.optJSONArray("performers") ?: JSONArray()
+                    val castList = (0 until perfArr.length()).mapNotNull { j ->
+                        try {
+                            // Performers in scene search are site-performer objects
+                            // with nested "parent" that has the canonical name.
+                            val p      = perfArr.getJSONObject(j)
+                            val parent = p.optJSONObject("parent")
+                            (parent?.optString("name") ?: p.optString("name", ""))
+                                .takeIf { it.isNotBlank() }
+                        } catch (e: Exception) { null }
+                    }
+
+                    Movie(
+                        id          = id,
+                        title       = title,
+                        posterUrl   = imageUrl,
+                        backdropUrl = imageUrl,
+                        rating      = 0.0,
+                        genre       = listOf(site.ifBlank { if (type == "xxx_movie") "XXX Movie" else "XXX" }),
+                        duration    = if (dur > 0) "${dur / 60} min" else "N/A",
+                        releaseYear = date.take(4).toIntOrNull() ?: 0,
+                        synopsis    = buildString {
+                            if (castList.isNotEmpty()) append(castList.joinToString(", "))
+                            if (site.isNotBlank()) { if (isNotEmpty()) append(" · "); append(site) }
+                        },
+                        mediaType  = type,
+                        castNames  = castList
+                    )
+                } catch (e: Exception) { null }
+            }
+        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+    }
+
+    // ── Combined cast + text search ───────────────────────────────────────────
+    //
+    // Mirrors what the TPDB website does:
+    //   /scenes?q=...&performers[id]=Name&performer_and=1&orderBy=most_relevant
+    //
+    // For a single performer with no text query we still use the dedicated
+    // /performers/{id}/scenes endpoint which is faster and more reliable.
+    // For everything else — multi-cast, or single-cast + text — we use the
+    // combined endpoint so the server does the intersection properly.
+    //
+    suspend fun searchPDBScenesByCast(
+        castIds: List<String>,
+        castNames: Map<String, String>,
+        query: String = "",
+        page: Int = 1
+    ): List<Movie> {
+        return try {
+            if (castIds.size == 1 && query.isBlank()) {
+                // Fast path: single performer, no text query
+                pdbService.getPerformerScenes("Bearer $tpdbApiKey", castIds.first(), page)
+                    .data.map { it.toMovie("xxx") }
+            } else {
+                // Full combined search: text + one or more performers
+                val url = buildPdbHttpUrl(
+                    endpoint     = "scenes",
+                    query        = query,
+                    castIds      = castIds,
+                    castNames    = castNames,
+                    performerAnd = castIds.size > 1,  // AND only when multiple performers
+                    orderBy      = if (query.isNotBlank()) "most_relevant" else "recently_released",
+                    page         = page
+                )
+                parsePdbResponse(rawPdbGet(url), "xxx")
+            }
+        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+    }
+
+    suspend fun searchPDBMoviesByCast(
+        castIds: List<String>,
+        castNames: Map<String, String>,
+        query: String = "",
+        page: Int = 1
+    ): List<Movie> {
+        return try {
+            if (castIds.size == 1 && query.isBlank()) {
+                pdbService.getPerformerMovies("Bearer $tpdbApiKey", castIds.first(), page)
+                    .data.map { it.toMovie("xxx_movie") }
+            } else {
+                val url = buildPdbHttpUrl(
+                    endpoint     = "movies",
+                    query        = query,
+                    castIds      = castIds,
+                    castNames    = castNames,
+                    performerAnd = castIds.size > 1,
+                    orderBy      = if (query.isNotBlank()) "most_relevant" else "recently_released",
+                    page         = page
+                )
+                parsePdbResponse(rawPdbGet(url), "xxx_movie")
+            }
+        } catch (e: Exception) { e.printStackTrace(); emptyList() }
+    }
+
+    // ── Text-only search ──────────────────────────────────────────────────────
     suspend fun searchMovies(query: String, page: Int = 1): List<Movie> =
         try { apiService.searchMovies(tmdbApiKey, query, page = page).results.map { it.toMovie("movie") } }
         catch (e: Exception) { emptyList() }
@@ -183,32 +366,6 @@ class MovieRepository(private val movieDao: MovieDao) {
     suspend fun searchPerformers(query: String): List<PDBPerformerResult> =
         try { pdbService.searchPerformers("Bearer $tpdbApiKey", query).data }
         catch (e: Exception) { emptyList() }
-
-    suspend fun searchPDBScenesByCast(castIds: List<String>, castNames: Map<String, String>, page: Int = 1): List<Movie> {
-        return try {
-            if (castIds.size == 1) {
-                pdbService.getPerformerScenes("Bearer $tpdbApiKey", castIds.first(), page)
-                    .data.map { it.toMovie("xxx") }
-            } else {
-                val map = castIds.associate { id -> "performers[$id]" to (castNames[id] ?: id) }
-                pdbService.searchScenesByPerformers("Bearer $tpdbApiKey", map, false, page)
-                    .data.map { it.toMovie("xxx") }
-            }
-        } catch (e: Exception) { e.printStackTrace(); emptyList() }
-    }
-
-    suspend fun searchPDBMoviesByCast(castIds: List<String>, castNames: Map<String, String>, page: Int = 1): List<Movie> {
-        return try {
-            if (castIds.size == 1) {
-                pdbService.getPerformerMovies("Bearer $tpdbApiKey", castIds.first(), page)
-                    .data.map { it.toMovie("xxx_movie") }
-            } else {
-                val map = castIds.associate { id -> "performers[$id]" to (castNames[id] ?: id) }
-                pdbService.searchMoviesByPerformers("Bearer $tpdbApiKey", map, false, page)
-                    .data.map { it.toMovie("xxx_movie") }
-            }
-        } catch (e: Exception) { e.printStackTrace(); emptyList() }
-    }
 
     // ── Discovery ─────────────────────────────────────────────────────────────
     suspend fun getTrendingMovies(): List<Movie> =
