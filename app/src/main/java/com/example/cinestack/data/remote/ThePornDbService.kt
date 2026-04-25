@@ -1,5 +1,6 @@
 package com.example.cinestack.data.remote
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Path
@@ -105,7 +106,8 @@ data class PDBPerformerSearchResponse(
 )
 
 data class PDBPerformerResult(
-    val id   : String,
+    val id   : String,           // UUID — keep for starring
+    @SerializedName("_id") val numericId: Int = 0,  // ← ADD THIS
     val name : String,
     val image: String?
 )

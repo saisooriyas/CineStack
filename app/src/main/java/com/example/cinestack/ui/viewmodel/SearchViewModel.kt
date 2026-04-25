@@ -294,17 +294,16 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearPerformerSuggestions() { _performerSuggestions.value = emptyList() }
 
-    fun addCastFilter(id: String, name: String) {
+    fun addCastFilter(uuid: String, numericId: String, name: String) {
         val current = _selectedCastIds.value.toMutableList()
-        if (current.none { it.first == id }) current.add(id to name)
+        if (current.none { it.first == numericId }) current.add(numericId to name)
         _selectedCastIds.value = current
         _performerSuggestions.value = emptyList()
-        // Re-run with existing text query + new cast filter
         runXxxSearch(_searchQuery.value, _selectedType.value, 1)
     }
 
-    fun removeCastFilter(id: String) {
-        _selectedCastIds.value = _selectedCastIds.value.filter { it.first != id }
+    fun removeCastFilter(numericId: String) {
+        _selectedCastIds.value = _selectedCastIds.value.filter { it.first != numericId }
         if (_selectedCastIds.value.isEmpty() && _searchQuery.value.isBlank()) {
             _searchResults.value = emptyList()
         } else {
@@ -354,8 +353,10 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ── Starred performers ────────────────────────────────────────────────────
-    fun starPerformer(id: String, name: String, imageUrl: String) {
-        repository.starPerformer(StarredPerformerEntity(id = id, name = name, imageUrl = imageUrl))
+    fun starPerformer(id: String, numericId: String, name: String, imageUrl: String) {
+        repository.starPerformer(StarredPerformerEntity(
+            id = id, numericId = numericId, name = name, imageUrl = imageUrl
+        ))
     }
 
     fun unstarPerformer(id: String) = repository.unstarPerformer(id)

@@ -373,7 +373,12 @@ fun ManagePerformersDialog(viewModel: SearchViewModel, onDismiss: () -> Unit) {
                                     modifier = Modifier.fillMaxWidth()
                                         .clickable {
                                             if (isStarred) viewModel.unstarPerformer(p.id)
-                                            else viewModel.starPerformer(p.id, p.name, p.image ?: "")
+                                            else viewModel.starPerformer(
+                                                p.id,
+                                                p.numericId.toString(),
+                                                p.name,
+                                                p.image ?: ""
+                                            )
                                         }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically

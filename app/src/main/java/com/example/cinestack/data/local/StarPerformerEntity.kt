@@ -5,7 +5,8 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "starred_performers")
 data class StarredPerformerEntity(
-    @PrimaryKey val id: String,
+    @PrimaryKey val id: String,   // UUID
+    val numericId: String = "",   // ← ADD: integer id as string for TPDB filtering
     val name: String,
     val imageUrl: String
 )

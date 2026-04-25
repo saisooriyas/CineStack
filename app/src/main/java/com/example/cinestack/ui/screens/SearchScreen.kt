@@ -839,7 +839,11 @@ fun XxxCastFilterBar(viewModel: SearchViewModel, isMovieMode: Boolean, modifier:
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clickable {
-                                    viewModel.addCastFilter(performer.id, performer.name)
+                                    viewModel.addCastFilter(
+                                        performer.id,
+                                        performer.numericId.toString(),
+                                        performer.name
+                                    )
                                     castQuery = ""
                                 }
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
