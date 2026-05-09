@@ -861,3 +861,35 @@ fun XxxCastFilterBar(viewModel: SearchViewModel, isMovieMode: Boolean, modifier:
         }
     }
 }
+
+// Strips season suffixes to get a canonical series name for grouping
+fun extractSeriesTitle(title: String): String {
+    return title
+        .replace(Regex("(?i)\\s*:?\\s*(season|part|cour)\\s*\\d+.*$"), "")
+        .replace(Regex("(?i)\\s*\\d+(st|nd|rd|th)\\s*(season|cour).*$"), "")
+        .replace(Regex("(?i)\\s*(2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\\s*(season|cour).*$"), "")
+        .replace(Regex("(?i)\\s+\\d+$"), "")           // trailing number "Re:Zero 2"
+        .replace(Regex("(?i)\\s*(II|III|IV|V|VI)$"), "") // trailing Roman numerals
+        .trim()
+        .ifBlank { title }
+}
+
+fun extractSeasonNumber(title: String): Int {
+    // Try "4th Season", "Season 4", "2nd Season" etc.
+    val patterns = listOf(
+        Regex("(?i)(\\d+)(?:st|nd|rd|th)\\s*(?:season|cour)"),
+        Regex("(?i)season\\s*(\\d+)"),
+        Regex("(?i)part\\s*(\\d+)"),
+        Regex("(?i)cour\\s*(\\d+)")
+    )
+    for (pattern in patterns) {
+        pattern.find(title)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+    }
+    // "2nd Season" ordinal words
+    val ordinals = mapOf("2nd" to 2, "3rd" to 3, "4th" to 4, "5th" to 5,
+        "6th" to 6, "7th" to 7, "8th" to 8, "9th" to 9, "10th" to 10)
+    ordinals.forEach { (word, num) ->
+        if (title.contains(word, ignoreCase = true)) return num
+    }
+    return 1 // assume Season 1 if no suffix found
+}

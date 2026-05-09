@@ -1,5 +1,8 @@
 package com.example.cinestack.data.model
 
+import com.example.cinestack.ui.screens.extractSeasonNumber
+import com.example.cinestack.ui.screens.extractSeriesTitle
+
 data class Movie(
     val id: String,
     val title: String,
@@ -16,9 +19,16 @@ data class Movie(
     val currentSeason: Int = 0,
     val currentEpisode: Int = 0,
     val totalEpisodes: Int = 0,
+    val seriesId: String = "",      // root mal_id of the franchise
+    val seasonNumber: Int = 0,
     // Comma-separated list of cast names (populated for XXX content)
     val castNames: List<String> = emptyList()
-)
+) {
+    // Derived — used for grouping without any extra API calls
+    val seriesKey: String get() = seriesId.ifBlank { extractSeriesTitle(title) }
+    val resolvedSeasonNumber: Int get() = if (seasonNumber > 0) seasonNumber
+    else extractSeasonNumber(title)
+}
 
 val sampleMovies = listOf(
     Movie(

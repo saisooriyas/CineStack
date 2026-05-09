@@ -103,6 +103,12 @@ interface ApiService {
         @Query("limit") limit: Int = 20
     ): JikanResponse
 
+    @GET("https://api.jikan.moe/v4/anime/{id}")
+    suspend fun getAnimeDetails(
+        @Path("id") id: String,
+        @Query("fields") fields: String = "related_anime,media_type,season,year"
+    ): JikanDetailResponse  // wrapper around AnimeData
+
     // ── Recommendations ───────────────────────────────────────────────────
     @GET("{type}/{id}/recommendations")
     suspend fun getRecommendations(

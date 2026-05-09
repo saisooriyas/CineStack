@@ -20,6 +20,8 @@ data class MovieEntity(
     val currentSeason: Int = 0,
     val currentEpisode: Int = 0,
     val totalEpisodes: Int = 0,
+    val seriesId: String = "",      // root mal_id of the franchise
+    val seasonNumber: Int = 0,
     // Comma-separated cast names — used for XXX performer grouping
     val castNames: String = ""
 )

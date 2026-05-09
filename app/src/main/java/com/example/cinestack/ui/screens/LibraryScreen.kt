@@ -56,7 +56,11 @@ fun LibraryScreen(
     val tabContent: List<Movie> = when (selectedTab) {
         "MOVIES" -> library.filter { it.mediaType == "movie" }
         "TV"     -> library.filter { it.mediaType == "tv" }
-        "ANIME"  -> library.filter { it.mediaType == "anime" }
+        "ANIME" -> library.filter {
+            it.mediaType == "anime" ||
+                    it.mediaType == "anime_movie" ||
+                    it.mediaType == "anime_ova"
+        }
         "XXX"    -> library.filter { it.mediaType == "xxx" || it.mediaType == "xxx_movie" }
         else     -> library.filter { it.mediaType != "xxx" && it.mediaType != "xxx_movie" }
     }
@@ -238,14 +242,59 @@ fun LibraryScreen(
                 }
 
                 else -> {
-                    // ALL / MOVIES / TV / ANIME — status-bucketed grid
                     if (tabContent.isEmpty()) {
                         item { EmptyTabMessage("Nothing here yet.\nSearch and add content!") }
+                    } else if (selectedTab == "ANIME") {
+                        // ── ANIME: group by series title, then show one card per series ──
+
+                        // Group all anime items by their canonical series title
+                        val seriesGroups = tabContent
+                            .groupBy { it.seriesKey }
+                            .toSortedMap()  // alphabetical order
+
+                        seriesGroups.forEach { (_, seasons) ->
+                            val sortedSeasons = seasons.sortedBy { it.resolvedSeasonNumber }
+
+                            if (seasons.size == 1) {
+                                val movie = sortedSeasons.first()
+                                item(key = "anime_single_${movie.id}") {
+                                    // Single entry — show normally inside a status section
+                                    CollapsibleStatusSection(
+                                        title        = movie.userStatus.ifBlank { "UNSORTED" }.uppercase(),
+                                        color        = statusColor(movie.userStatus.ifBlank { "UNSORTED" }),
+                                        items        = listOf(movie),
+                                        onMovieClick = onMovieClick
+                                    )
+                                }
+                            } else {
+                                item(key = "anime_series_${sortedSeasons.first().id}") {
+                                    SeriesGroupCard(
+                                        seriesTitle   = sortedSeasons.first().seriesKey,
+                                        seasons       = sortedSeasons,
+                                        onSeasonClick = onMovieClick
+                                    )
+                                }
+                            }
+                        }
+
                     } else {
+                        // ── ALL / MOVIES / TV: original status-bucketed logic ────────────
+                        // For ALL tab, also group anime series before bucketing
+                        val (animeItems, nonAnimeItems) = if (selectedTab == "ALL") {
+                            tabContent.partition {
+                                it.mediaType == "anime" ||
+                                        it.mediaType == "anime_movie" ||
+                                        it.mediaType == "anime_ova"
+                            }
+                        } else {
+                            emptyList<Movie>() to tabContent
+                        }
+
+                        // Non-anime items by status
                         STATUS_ORDER.forEach { status ->
-                            val bucket = tabContent.filter { it.userStatus == status }
+                            val bucket = nonAnimeItems.filter { it.userStatus == status }
                             if (bucket.isNotEmpty()) {
-                                item {
+                                item(key = "status_${status}") {
                                     CollapsibleStatusSection(
                                         title        = status.uppercase(),
                                         color        = statusColor(status),
@@ -255,16 +304,50 @@ fun LibraryScreen(
                                 }
                             }
                         }
-                        // Items with no recognised status
-                        val other = tabContent.filter { it.userStatus !in STATUS_ORDER }
-                        if (other.isNotEmpty()) {
-                            item {
+                        val otherNonAnime = nonAnimeItems.filter { it.userStatus !in STATUS_ORDER }
+                        if (otherNonAnime.isNotEmpty()) {
+                            item(key = "status_unsorted_nonanime") {
                                 CollapsibleStatusSection(
                                     title        = "UNSORTED",
                                     color        = Color.Gray,
-                                    items        = other,
+                                    items        = otherNonAnime,
                                     onMovieClick = onMovieClick
                                 )
+                            }
+                        }
+
+                        // Anime series groups (only in ALL tab)
+                        if (animeItems.isNotEmpty()) {
+                            item(key = "anime_header") {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                SectionHeaderWithLine("ANIME SERIES", Color(0xFFB71C1C))
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            val seriesGroups = animeItems
+                                .groupBy { it.seriesKey }
+                                .toSortedMap()
+
+                            seriesGroups.forEach { (_, seasons) ->
+                                val sortedSeasons = seasons.sortedBy { it.resolvedSeasonNumber }
+                                if (seasons.size == 1) {
+                                    item(key = "all_anime_single_${sortedSeasons.first().id}") {
+                                        CollapsibleStatusSection(
+                                            title        = sortedSeasons.first().userStatus.ifBlank { "UNSORTED" }.uppercase(),
+                                            color        = statusColor(sortedSeasons.first().userStatus),
+                                            items        = sortedSeasons,
+                                            onMovieClick = onMovieClick
+                                        )
+                                    }
+                                } else {
+                                    item(key = "all_anime_series_${sortedSeasons.first().id}") {
+                                        SeriesGroupCard(
+                                            seriesTitle   = sortedSeasons.first().seriesKey,
+                                            seasons       = sortedSeasons,
+                                            onSeasonClick = onMovieClick
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -520,6 +603,173 @@ fun PerformerSection(
         }
 
         HorizontalDivider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(horizontal = 24.dp))
+    }
+}
+
+@Composable
+fun SeriesGroupCard(
+    seriesTitle: String,
+    seasons: List<Movie>,
+    onSeasonClick: (Movie) -> Unit
+) {
+    var expanded by remember { mutableStateOf(true) }
+
+    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+        // ── Series header row ─────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Thumbnail of first season
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1A1A1A))
+            ) {
+                AsyncImage(
+                    model        = seasons.first().posterUrl,
+                    contentDescription = null,
+                    modifier     = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                // Strip season-specific suffixes for the series title
+                val cleanTitle = seriesTitle
+                    .replace(Regex("(?i)\\s*(season|part|cour)\\s*\\d+"), "")
+                    .replace(Regex("(?i)\\s*\\d+(st|nd|rd|th)\\s*(season|cour)"), "")
+                    .trim()
+
+                Text(
+                    cleanTitle.ifBlank { seriesTitle },
+                    color      = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style      = MaterialTheme.typography.titleSmall,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis
+                )
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFFB71C1C).copy(alpha = 0.8f)
+                    ) {
+                        Text(
+                            "ANIME",
+                            modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            style      = MaterialTheme.typography.labelSmall,
+                            color      = Color.White,
+                            fontSize   = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        "${seasons.size} season${if (seasons.size != 1) "s" else ""}",
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint     = Color.Gray,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // ── Expanded seasons list ─────────────────────────────────────────
+        AnimatedVisibility(
+            visible = expanded,
+            enter   = expandVertically(),
+            exit    = shrinkVertically()
+        ) {
+            Column(modifier = Modifier.padding(start = 84.dp, end = 24.dp, bottom = 8.dp)) {
+                seasons.forEach { season ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { onSeasonClick(season) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF1A1A1A)
+                    ) {
+                        Row(
+                            modifier          = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            AsyncImage(
+                                model        = season.posterUrl,
+                                contentDescription = null,
+                                modifier     = Modifier
+                                    .size(width = 36.dp, height = 52.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    season.title,
+                                    color      = Color.White,
+                                    style      = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines   = 2,
+                                    overflow   = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (season.releaseYear > 0) {
+                                        Text(
+                                            "${season.releaseYear}",
+                                            color = Color.Gray,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                    Text(
+                                        season.duration,
+                                        color = Color.Gray,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+
+                            // Status chip
+                            if (season.userStatus.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = statusColor(season.userStatus).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        season.userStatus.uppercase(),
+                                        modifier   = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                        style      = MaterialTheme.typography.labelSmall,
+                                        color      = statusColor(season.userStatus),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize   = 8.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(
+            color    = Color.White.copy(alpha = 0.05f),
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
     }
 }
 

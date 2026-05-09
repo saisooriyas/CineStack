@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         GroupItemEntity::class,
         StarredPerformerEntity::class
     ],
-    version = 12
+    version = 13
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun movieDao(): MovieDao

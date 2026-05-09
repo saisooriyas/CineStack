@@ -7,6 +7,10 @@ data class JikanResponse(
     val data: List<AnimeData>
 )
 
+data class JikanDetailResponse(
+    val data: AnimeData
+)
+
 // ── Top/Ranking response (/v4/top/anime) — items are wrapped in "node" ────
 // Jikan top anime returns: { data: [ { mal_id, title, images, score, ... }, ... ] }
 // (Same flat structure as search — no node wrapper in Jikan v4 top endpoint)
@@ -20,7 +24,22 @@ data class AnimeData(
     val score: Double?,
     val synopsis: String?,
     val episodes: Int?,
-    val year: Int?
+    val year: Int?,
+    @SerializedName("media_type") val mediaType: String?, // "tv", "movie", "ova"
+    val season: String?,                                   // "spring", "summer" etc
+    @SerializedName("related_anime") val relatedAnime: List<JikanRelatedAnime>? = null
+)
+
+data class JikanRelatedAnime(
+    val relation: String,   // "Sequel", "Prequel", "Side Story"
+    val entry: JikanEntry
+)
+
+data class JikanEntry(
+    @SerializedName("mal_id") val malId: Int,
+    val type: String,       // "anime"
+    val name: String,
+    val url: String
 )
 
 data class AnimeImages(

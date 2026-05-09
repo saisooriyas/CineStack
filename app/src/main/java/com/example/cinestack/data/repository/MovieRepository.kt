@@ -7,6 +7,7 @@ import com.example.cinestack.data.local.MovieDao
 import com.example.cinestack.data.local.MovieEntity
 import com.example.cinestack.data.local.StarredPerformerEntity
 import com.example.cinestack.data.model.Movie
+import com.example.cinestack.data.remote.AnimeData
 import com.example.cinestack.data.remote.ApiService
 import com.example.cinestack.data.remote.PDBPerformerResult
 import com.example.cinestack.data.remote.PDBRestScene
@@ -345,6 +346,42 @@ class MovieRepository(private val movieDao: MovieDao) {
         try { apiService.searchTV(tmdbApiKey, query, page = page).results.map { it.toMovie("tv") } }
         catch (e: Exception) { emptyList() }
 
+    // In MovieRepository, replace the anime mapper
+    private fun AnimeData.toMovie(): Movie {
+        val subType = when (mediaType?.lowercase()) {
+            "movie"   -> "anime_movie"
+            "ova"     -> "anime_ova"
+            "special" -> "anime_special"
+            else      -> "anime" // tv, unknown
+        }
+        return Movie(
+            id          = malId,
+            title       = title,
+            posterUrl   = images.jpg.largeImageUrl,
+            backdropUrl = images.jpg.largeImageUrl,
+            rating      = score ?: 0.0,
+            genre       = listOf(subType.replace("_", " ").uppercase()),
+            duration    = "${episodes ?: "?"} eps",
+            releaseYear = year ?: 0,
+            synopsis    = synopsis ?: "",
+            mediaType   = subType
+        )
+    }
+
+    suspend fun resolveSeriesRoot(malId: String): String {
+        return try {
+            val detail = apiService.getAnimeDetails(malId) // fetch single anime
+            val prequel = detail.data.relatedAnime
+                ?.firstOrNull { it.relation == "Prequel" }
+            if (prequel != null) {
+                resolveSeriesRoot(prequel.entry.malId.toString()) // recurse
+            } else {
+                malId // this IS the root
+            }
+        } catch (e: Exception) {
+            malId // fallback: treat itself as root
+        }
+    }
     suspend fun searchAnime(query: String, page: Int = 1): List<Movie> =
         try {
             apiService.searchAnime(query, page = page).data.map { anime ->
